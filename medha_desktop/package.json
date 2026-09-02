@@ -1,0 +1,53 @@
+{
+  "name": "medha-data-analyser",
+  "version": "0.1.0",
+  "description": "Standalone Medha MEC628 locomotive data analyser",
+  "main": "electron-main.js",
+  "author": "ELS/ED",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "in.railways.elsed.medhadataanalyser",
+    "productName": "Medha Data Analyser",
+    "asar": true,
+    "compression": "maximum",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron-main.js",
+      "preload.js",
+      "package.json",
+      "viewer/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist_backend/medha_backend.exe",
+        "to": "backend/medha_backend.exe"
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "artifactName": "Medha-Data-Analyser-Setup-${version}.${ext}",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Medha Data Analyser",
+      "runAfterFinish": true
+    }
+  }
+}
+

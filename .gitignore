@@ -1,0 +1,41 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node/Electron dependencies and packaged output
+node_modules/
+medha_desktop/node_modules/
+medha_desktop/dist/
+dist_backend/
+build_backend/
+*.spec
+
+# Raw locomotive downloads and exported reports
+*.zip
+*.ZIP
+*.dat
+*.DAT
+*.xls
+*.xlsx
+*.csv
+analysis/
+
+# Vendor applications and encrypted definition packages
+DASAPP - Common Data Analysis Software - Version 1.0.9/
+DASAPP_SupportAppData/
+MEC628V2/
+*.das
+
+# Local settings, logs and secrets
+.env
+.env.*
+*.log
+.vscode/
+.idea/
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store

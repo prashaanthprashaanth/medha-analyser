@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Medha Data Analyser</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="topbar-side"></div>
+      <div class="brand-block">
+        <h1>MEDHA DATA ANALYSER</h1>
+        <p class="developer-credit">Developed by ELS/ED</p>
+        <p id="fileStatus" class="file-status">No locomotive data loaded</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="openArchive" class="primary-button" type="button">
+          <span class="button-icon">+</span> Upload ALL Data ZIP
+        </button>
+      </div>
+    </header>
+
+    <section class="summary-strip" aria-label="Archive summary">
+      <article><strong id="visibleFaultCount">0</strong><span>visible faults</span></article>
+      <article><strong id="allFaultCount">0</strong><span>all log entries</span></article>
+      <article><strong id="snapshotCount">—</strong><span>faults with retained FDP</span></article>
+      <article><strong id="rangeText">—</strong><span>fault-log date range</span></article>
+    </section>
+
+    <section class="worker-strip" aria-label="Background data processing">
+      <div class="worker-copy">
+        <strong>Background indexing</strong>
+        <span>Fault actions take priority; history workers pause and resume automatically.</span>
+      </div>
+      <div class="worker" data-worker="FDP">
+        <span>Fault Data Pack</span><progress id="fdpProgress" max="100" value="0"></progress><b id="fdpPercent">0%</b>
+      </div>
+      <div class="worker" data-worker="LGM">
+        <span>Long term</span><progress id="lgmProgress" max="100" value="0"></progress><b id="lgmPercent">0%</b>
+      </div>
+      <div class="worker" data-worker="SHM">
+        <span>Short term</span><progress id="shmProgress" max="100" value="0"></progress><b id="shmPercent">0%</b>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <nav class="tabs" aria-label="Data views">
+        <button class="tab active" data-tab="faults" type="button">Fault Log</button>
+        <button class="tab" data-tab="LGM" type="button">Long-Term Data</button>
+        <button class="tab" data-tab="SHM" type="button">Short-Term Data</button>
+        <button id="depthTab" class="tab" data-tab="depth" type="button">Depth Analysis (0)</button>
+        <button class="tab" data-tab="population" type="button">Population Analysis</button>
+        <button class="tab" data-tab="overview" type="button">Archive Overview</button>
+      </nav>
+
+      <section id="faultView" class="view-panel">
+        <header class="panel-head">
+          <div>
+            <h2>Fault Log</h2>
+            <p>All faults are shown in one continuously scrollable list. Click a row to open its diagnostic window.</p>
+          </div>
+          <button id="faultCsv" type="button" disabled>Download Fault Excel</button>
+        </header>
+        <div class="filter-bar">
+          <label class="search-field">
+            <span>Search</span>
+            <input id="faultSearch" type="search" placeholder="Fault message, code, DMC…" disabled>
+          </label>
+          <label>
+            <span>Environment</span>
+            <select id="environmentFilter" disabled>
+              <option value="all">All faults</option>
+              <option value="Available">FDP available</option>
+              <option value="Not retained">FDP not retained</option>
+            </select>
+          </label>
+          <label>
+            <span>From date</span>
+            <input id="faultFrom" type="date" disabled>
+          </label>
+          <label>
+            <span>To date</span>
+            <input id="faultTo" type="date" disabled>
+          </label>
+          <label class="check-field">
+            <input id="includeHidden" type="checkbox" disabled>
+            <span>Include hidden / undefined</span>
+          </label>
+          <button id="clearFaultFilters" type="button" disabled>Clear</button>
+        </div>
+        <div class="result-line"><strong id="filteredFaultCount">0</strong> fault records · newest first</div>
+        <div class="fault-grid" role="table" aria-label="Fault records">
+          <div class="fault-grid-header" role="row">
+            <span>Pick</span><span>Date &amp; Time</span><span>Code</span><span>Fault</span><span>DMC</span>
+            <span>Role</span><span>Packet</span><span>Environment</span>
+          </div>
+          <div id="faultViewport" class="fault-viewport" tabindex="0">
+            <div id="faultSpacer" class="fault-spacer">
+              <div id="faultRows" class="fault-rows"></div>
+            </div>
+            <div id="faultEmpty" class="empty-state">
+              <div class="empty-icon">M</div>
+              <h3>Upload locomotive ALL data</h3>
+              <p>Select the original ZIP containing ERRORLOG.DAT, FLTPACK.DAT, LONGMEM.DAT and SHORTMEM.DAT.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="historyView" class="view-panel" hidden>
+        <header class="panel-head">
+          <div>
+            <h2 id="historyTitle">Long-Term Data</h2>
+            <p id="historySubtitle"></p>
+          </div>
+          <div class="panel-actions">
+            <button id="historyExcel" type="button" disabled>Download displayed rows as Excel</button>
+            <div id="historyReadyBadge" class="status-badge">Waiting for upload</div>
+          </div>
+        </header>
+        <div id="historyWaiting" class="history-waiting">
+          <h3 id="historyWaitingTitle">Background indexing</h3>
+          <progress id="historyWaitProgress" max="100" value="0"></progress>
+          <p id="historyWaitingText">This starts after the fault list is ready.</p>
+        </div>
+        <div id="historyContent" hidden>
+          <div class="filter-bar history-controls">
+            <label><span>From date &amp; time</span><input id="historyFrom" type="datetime-local"></label>
+            <label><span>To date &amp; time</span><input id="historyTo" type="datetime-local"></label>
+            <label><span>Rows</span><select id="historyLimit"><option>250</option><option selected>500</option><option>1000</option><option>2000</option></select></label>
+            <button id="historyApply" class="primary-button" type="button">Apply time range</button>
+          </div>
+          <section class="chart-panel">
+            <header class="chart-heading">
+              <div>
+                <h3>Interactive time-range chart</h3>
+                <p>Choose parameters and date/time above. Use the mouse wheel to zoom the X-axis; drag the A and B bars to mark a time slot.</p>
+              </div>
+              <div class="chart-heading-actions">
+                <button id="chartPng" type="button" disabled>Download PNG</button>
+                <button id="chartPdf" type="button" disabled>Download PDF</button>
+                <button id="resetChart" type="button" disabled>Reset full range</button>
+                <button id="viewSelectedRange" class="primary-button" type="button" disabled>View selected time slot</button>
+              </div>
+            </header>
+            <div class="chart-controls">
+              <label>
+                <span>Chart parameters (Ctrl + click for multiple)</span>
+                <select id="chartParameters" multiple size="5"></select>
+              </label>
+              <div class="chart-load-box">
+                <button id="loadChart" class="primary-button" type="button" disabled>Draw selected parameters</button>
+                <p id="chartStatus">Select the long-term or short-term tab to prepare a chart.</p>
+              </div>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="historyChart" height="350" aria-label="Interactive locomotive history chart"></canvas>
+              <div id="chartTooltip" class="chart-tooltip" hidden></div>
+            </div>
+            <div class="selection-summary" id="chartSelection">Selection bars will appear after chart data is loaded.</div>
+          </section>
+          <div class="history-summary" id="historySummary"></div>
+          <div class="table-scroll"><table id="historyTable"><thead></thead><tbody></tbody></table></div>
+          <div class="pager">
+            <button id="historyPrevious" type="button">Previous</button>
+            <span id="historyPageText">Page 1</span>
+            <button id="historyNext" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="depthView" class="view-panel" hidden>
+        <header class="panel-head">
+          <div>
+            <h2>Depth Analysis</h2>
+            <p>Select retained faults in the Fault Log, choose FDP parameters, and compare their pre/fault/post patterns.</p>
+          </div>
+          <div id="depthBadge" class="status-badge">0 faults selected</div>
+        </header>
+        <div class="depth-setup">
+          <section class="depth-picker">
+            <div class="depth-picker-title"><h3>Selected fault logs</h3><button id="depthClear" type="button">Clear all</button></div>
+            <div id="depthFaultList" class="depth-fault-list">
+              <p class="depth-placeholder">Use the Compare checkboxes in the Fault Log. Up to 12 retained faults can be selected.</p>
+            </div>
+          </section>
+          <section class="depth-picker">
+            <div class="depth-picker-title"><h3>Parameters to compare</h3><span>Maximum 6</span></div>
+            <input id="depthParameterSearch" class="depth-search" type="search" placeholder="Search 807 FDP parameters…">
+            <select id="depthParameters" multiple size="10" disabled></select>
+            <button id="depthRun" class="primary-button" type="button" disabled>Run pattern comparison</button>
+          </section>
+        </div>
+        <div id="depthProgress" class="depth-progress">Select at least two retained faults.</div>
+        <div id="depthResults" class="comparison-grid"></div>
+      </section>
+
+      <section id="populationView" class="view-panel" hidden>
+        <header class="panel-head">
+          <div>
+            <h2>Fault Population Analysis</h2>
+            <p>Whole-log frequency, time distribution, locomotive role, and retained-environment analysis.</p>
+          </div>
+          <button id="populationCsv" type="button" disabled>Download ranking Excel</button>
+        </header>
+        <div class="filter-bar population-controls">
+          <label><span>From date</span><input id="populationFrom" type="date"></label>
+          <label><span>To date</span><input id="populationTo" type="date"></label>
+          <label class="check-field"><input id="populationHidden" type="checkbox"><span>Include hidden / undefined</span></label>
+          <button id="populationApply" class="primary-button" type="button">Analyse population</button>
+        </div>
+        <div class="population-summary" id="populationSummary"></div>
+        <nav class="population-subtabs" aria-label="Population analysis views">
+          <button class="population-subtab active" data-population="counts" type="button">1. Fault Count Ranking</button>
+          <button class="population-subtab" data-population="timeline" type="button">2. Time Trend</button>
+          <button class="population-subtab" data-population="distribution" type="button">3. DMC &amp; Role</button>
+          <button class="population-subtab" data-population="retention" type="button">4. FDP Retention</button>
+        </nav>
+        <div id="populationContent" class="population-content">
+          <div class="depth-placeholder">Upload an ALL Data ZIP to analyse the complete fault population.</div>
+        </div>
+      </section>
+
+      <section id="overviewView" class="view-panel" hidden>
+        <header class="panel-head"><div><h2>Archive Overview</h2><p>Dataset availability and processing state.</p></div></header>
+        <div id="overviewCards" class="overview-cards"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="loadingOverlay" class="loading-overlay" hidden>
+    <div class="loading-card">
+      <div class="loader-mark">M</div>
+      <h2 id="loadingTitle">Opening ALL data</h2>
+      <p id="loadingText">Reading ERRORLOG.DAT first…</p>
+      <div class="indeterminate"><span></span></div>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <script src="history_chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

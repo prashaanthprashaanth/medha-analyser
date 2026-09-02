@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Medha Fault Data Pack</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="detail-shell">
+    <header class="detail-topbar">
+      <div><button id="closeWindow" type="button">← Fault Log</button></div>
+      <div class="brand-block">
+        <h1>MEDHA DATA ANALYSER</h1>
+        <p class="developer-credit">Developed by ELS/ED</p>
+        <p class="file-status">Fault Data Pack · Diagnostic Data Analysis</p>
+      </div>
+      <div class="detail-topbar-actions">
+        <button id="detailCsv" type="button" disabled>Excel</button>
+        <button id="detailHtml" class="primary-button" type="button" disabled>HTML Report</button>
+      </div>
+    </header>
+
+    <section id="faultCard" class="fault-card" hidden>
+      <div class="fault-metrics">
+        <div class="metric-card"><label>Date and time</label><output id="faultTime"></output></div>
+        <div class="metric-card"><label>Fault code</label><output id="faultCode"></output></div>
+        <div class="metric-card"><label>DMC</label><output id="faultDmc"></output></div>
+        <div class="metric-card"><label>Role</label><output id="faultRole"></output></div>
+      </div>
+      <p id="faultMessage" class="fault-description"></p>
+      <p id="faultMeta" class="file-status"></p>
+    </section>
+
+    <section id="detailContent" class="detail-content" hidden>
+      <header class="panel-head">
+        <div>
+          <h2>Pre-fault, occurrence and post-fault readings</h2>
+          <p id="windowDescription"></p>
+        </div>
+        <div id="parameterCount" class="status-badge"></div>
+      </header>
+      <div id="sampleStrip" class="sample-strip"></div>
+      <div class="parameter-toolbar">
+        <label>Search parameter or sub-signal
+          <input id="parameterSearch" type="search" placeholder="Temperature, pressure, VCU DIP, relay…">
+        </label>
+        <label class="check-field"><input id="showAllParameters" type="checkbox" checked> Show all definition parameters</label>
+      </div>
+      <div class="fdp-table-wrap">
+        <table class="fdp-table">
+          <thead id="fdpHead"></thead>
+          <tbody id="fdpBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="notRetained" class="error-panel" hidden>
+      <h2>Environment snapshot not retained</h2>
+      <p>This fault remains in ERRORLOG.DAT, but its older Fault Data Pack sequence has been overwritten in the circular FLTPACK.DAT memory.</p>
+    </section>
+
+    <section id="detailError" class="error-panel" hidden><h2>Unable to open fault</h2><p></p></section>
+  </main>
+
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-card">
+      <div class="loader-mark">M</div>
+      <h2>Preparing Fault Data Pack</h2>
+      <p id="detailLoadingText">Waiting for retained-snapshot index…</p>
+      <progress id="detailProgress" max="100" value="0"></progress>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <script src="detail.js"></script>
+</body>
+</html>

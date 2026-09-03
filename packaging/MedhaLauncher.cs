@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -34,7 +35,16 @@ internal static class MedhaLauncher
         {
             if (resource == null) throw new InvalidOperationException("The analyser engine is missing");
             if (File.Exists(enginePath) && new FileInfo(enginePath).Length == resource.Length)
-                return enginePath;
+            {
+                byte[] packagedHash;
+                byte[] installedHash;
+                using (SHA256 sha = SHA256.Create()) packagedHash = sha.ComputeHash(resource);
+                resource.Position = 0;
+                using (FileStream installed = File.OpenRead(enginePath))
+                using (SHA256 sha = SHA256.Create()) installedHash = sha.ComputeHash(installed);
+                if (packagedHash.SequenceEqual(installedHash)) return enginePath;
+            }
+            resource.Position = 0;
             string staging = Path.Combine(runtimeDirectory, "MedhaEngine.new");
             using (FileStream output = new FileStream(staging, FileMode.Create, FileAccess.Write, FileShare.None))
                 resource.CopyTo(output);

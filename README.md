@@ -8,8 +8,10 @@ default browser, so Chromium is not bundled.
 
 - fault log loads first in one continuously scrollable list;
 - each fault opens in a separate browser tab with 10 time snapshots;
+- an initially unchecked parameter picker displays only the required readings;
 - 807 fault parameters and expandable bitwise sub-signals;
-- long-term and short-term data load only when requested or while idle;
+- long-term and short-term data load only when requested or while idle, with
+  their complete available time ranges filled automatically;
 - interactive charts with parameter selection, date/time range, zoom, and A/B
   time-selection bars;
 - chart download as PNG or PDF and data download as Excel or compact HTML;

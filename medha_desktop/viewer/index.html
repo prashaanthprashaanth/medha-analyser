@@ -127,16 +127,16 @@
         </div>
         <div id="historyContent" hidden>
           <div class="filter-bar history-controls">
-            <label><span>From date &amp; time</span><input id="historyFrom" type="datetime-local"></label>
-            <label><span>To date &amp; time</span><input id="historyTo" type="datetime-local"></label>
+            <label><span>From date &amp; time</span><input id="historyFrom" type="datetime-local" step="1"></label>
+            <label><span>To date &amp; time</span><input id="historyTo" type="datetime-local" step="1"></label>
             <label><span>Rows</span><select id="historyLimit"><option>250</option><option selected>500</option><option>1000</option><option>2000</option></select></label>
-            <button id="historyApply" class="primary-button" type="button">Apply time range</button>
+            <button id="historyApply" class="primary-button" type="button">Apply custom range</button>
           </div>
           <section class="chart-panel">
             <header class="chart-heading">
               <div>
                 <h3>Interactive time-range chart</h3>
-                <p>Choose parameters and date/time above. Use the mouse wheel to zoom the X-axis; drag the A and B bars to mark a time slot.</p>
+                <p>The full available time range is filled automatically. Change it only when needed, or use the mouse wheel and A/B bars to select a time slot.</p>
               </div>
               <div class="chart-heading-actions">
                 <button id="chartPng" type="button" disabled>Download PNG</button>

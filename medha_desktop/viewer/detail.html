@@ -43,9 +43,12 @@
       <div id="sampleStrip" class="sample-strip"></div>
       <div class="parameter-toolbar">
         <label>Search parameter or sub-signal
-          <input id="parameterSearch" type="search" placeholder="Temperature, pressure, VCU DIP, relay…">
+          <input id="parameterSearch" type="search" placeholder="Search within selected parameters…" disabled>
         </label>
-        <label class="check-field"><input id="showAllParameters" type="checkbox" checked> Show all definition parameters</label>
+        <div class="parameter-selection-actions">
+          <span id="selectionStatus">0 parameters selected</span>
+          <button id="openParameterPicker" class="primary-button" type="button">Select parameters</button>
+        </div>
       </div>
       <div class="fdp-table-wrap">
         <table class="fdp-table">
@@ -71,6 +74,35 @@
       <progress id="detailProgress" max="100" value="0"></progress>
     </div>
   </div>
+  <dialog id="parameterPicker" class="parameter-picker" aria-labelledby="parameterPickerTitle">
+    <form method="dialog" class="parameter-picker-card">
+      <header class="parameter-picker-head">
+        <div>
+          <span class="picker-kicker">Fault Data Pack display</span>
+          <h2 id="parameterPickerTitle">Select parameters</h2>
+          <p>All parameters start unchecked. Select only the readings required for this fault.</p>
+        </div>
+        <button id="closeParameterPicker" class="picker-close" type="button" aria-label="Close parameter selection">×</button>
+      </header>
+      <div class="parameter-picker-tools">
+        <label>Search parameter or sub-signal
+          <input id="pickerSearch" type="search" placeholder="Temperature, pressure, VCU DIP, relay…" autocomplete="off">
+        </label>
+        <div>
+          <button id="selectMatchingParameters" type="button">Select matching</button>
+          <button id="clearParameterSelection" type="button">Clear all</button>
+        </div>
+      </div>
+      <div id="pickerList" class="parameter-picker-list" aria-live="polite"></div>
+      <footer class="parameter-picker-footer">
+        <span id="pickerCount">0 of 0 selected</span>
+        <div>
+          <button id="cancelParameterPicker" type="button">Cancel</button>
+          <button id="applyParameterSelection" class="primary-button" type="button">Show selected parameters</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
   <div id="toast" class="toast" hidden></div>
   <script src="browser_bridge.js"></script>
   <script src="detail.js"></script>

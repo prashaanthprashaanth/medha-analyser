@@ -13,6 +13,7 @@
     fdpSynced: false,
     currentTab: "faults",
     history: { memory: null, offset: 0, limit: 500, data: null, loading: false, chartLoaded: false, chartLoading: false },
+    historyRanges: { LGM: null, SHM: null },
     depth: {
       selected: new Set(), parameters: [], selectedParameters: new Set(),
       metadataLoading: false, comparisonLoading: false
@@ -155,6 +156,17 @@
     state.depth.selected.clear();
     state.depth.parameters = [];
     state.depth.selectedParameters.clear();
+    state.history = {
+      memory: null, offset: 0, limit: Number(el.historyLimit.value), data: null,
+      loading: false, chartLoaded: false, chartLoading: false
+    };
+    state.historyRanges = { LGM: null, SHM: null };
+    el.historyFrom.value = "";
+    el.historyTo.value = "";
+    el.historyFrom.removeAttribute("min");
+    el.historyFrom.removeAttribute("max");
+    el.historyTo.removeAttribute("min");
+    el.historyTo.removeAttribute("max");
     state.fdpSynced = Boolean(result.status.ready?.FDP);
     el.fileStatus.textContent = result.archive;
     const visible = state.faults.filter((fault) => fault.visible);
@@ -172,6 +184,7 @@
     renderOverview();
     renderDepthSelection();
     initialisePopulationDates();
+    if (state.currentTab === "LGM" || state.currentTab === "SHM") openHistory(state.currentTab);
   }
 
   async function loadArchivePath(path) {
@@ -327,10 +340,19 @@
   function historyName(key) { return key === "LGM" ? "Long-Term Data" : "Short-Term Data"; }
 
   function openHistory(key) {
+    const rememberedRange = state.historyRanges[key];
     state.history = {
       memory: key, offset: 0, limit: Number(el.historyLimit.value), data: null,
       loading: false, chartLoaded: false, chartLoading: false
     };
+    el.historyFrom.value = rememberedRange?.from || "";
+    el.historyTo.value = rememberedRange?.to || "";
+    for (const control of [el.historyFrom, el.historyTo]) {
+      if (rememberedRange?.availableFrom) control.min = rememberedRange.availableFrom;
+      else control.removeAttribute("min");
+      if (rememberedRange?.availableTo) control.max = rememberedRange.availableTo;
+      else control.removeAttribute("max");
+    }
     el.chartParameters.dataset.memory = "";
     el.chartParameters.replaceChildren();
     el.loadChart.disabled = true;
@@ -339,6 +361,11 @@
     el.chartPng.disabled = true;
     el.chartPdf.disabled = true;
     el.historyExcel.disabled = true;
+    el.historyApply.disabled = true;
+    el.historySummary.textContent = "The full available time range will be filled automatically.";
+    el.historyPageText.textContent = "Page 1";
+    el.historyTable.querySelector("thead").replaceChildren();
+    el.historyTable.querySelector("tbody").replaceChildren();
     el.chartStatus.textContent = "Waiting for decoded history parameters.";
     historyChart.clear("Waiting for history data");
     el.historyTitle.textContent = historyName(key);
@@ -369,32 +396,54 @@
   }
 
   async function loadHistory(resetDates = false) {
-    const key = state.history.memory;
-    if (!key || state.history.loading) return;
-    state.history.loading = true;
+    const historyRequest = state.history;
+    const key = historyRequest.memory;
+    if (!key || historyRequest.loading) return;
+    const requestedFrom = el.historyFrom.value || null;
+    const requestedTo = el.historyTo.value || null;
+    historyRequest.loading = true;
+    el.historyApply.disabled = true;
     try {
       const result = await api("/history", {
         memory: key,
-        start: el.historyFrom.value || null,
-        end: el.historyTo.value || null,
-        offset: state.history.offset,
+        start: requestedFrom,
+        end: requestedTo,
+        offset: historyRequest.offset,
         limit: Number(el.historyLimit.value),
         newest_first: true
       });
+      if (state.history !== historyRequest) return;
       if (!result.ready) { updateWorkers(result.status); return; }
-      state.history.data = result;
-      state.history.limit = result.limit;
-      if (resetDates && !el.historyFrom.value && !el.historyTo.value) {
-        el.historyFrom.value = result.first_timestamp.replace(" ", "T");
-        el.historyTo.value = result.last_timestamp.replace(" ", "T");
+      historyRequest.data = result;
+      historyRequest.limit = result.limit;
+      const availableFrom = result.first_timestamp.replace(" ", "T");
+      const availableTo = result.last_timestamp.replace(" ", "T");
+      for (const control of [el.historyFrom, el.historyTo]) {
+        control.min = availableFrom;
+        control.max = availableTo;
       }
+      const rememberedRange = state.historyRanges[key];
+      if (resetDates && !rememberedRange) {
+        el.historyFrom.value = availableFrom;
+        el.historyTo.value = availableTo;
+      } else {
+        if (!el.historyFrom.value) el.historyFrom.value = availableFrom;
+        if (!el.historyTo.value) el.historyTo.value = availableTo;
+      }
+      state.historyRanges[key] = {
+        availableFrom,
+        availableTo,
+        from: el.historyFrom.value,
+        to: el.historyTo.value
+      };
       renderHistory(result);
       populateChartParameters(result.parameters, key);
-      if (!state.history.chartLoaded && !state.history.chartLoading) loadHistoryChart();
+      if (!historyRequest.chartLoaded && !historyRequest.chartLoading) loadHistoryChart();
     } catch (error) {
       showToast(error.message, true);
     } finally {
-      state.history.loading = false;
+      historyRequest.loading = false;
+      if (state.history === historyRequest) el.historyApply.disabled = !historyRequest.data;
     }
   }
 
@@ -472,8 +521,9 @@
   }
 
   async function loadHistoryChart() {
-    const key = state.history.memory;
-    if (!key || state.history.chartLoading || !state.status.ready?.[key]) return;
+    const historyRequest = state.history;
+    const key = historyRequest.memory;
+    if (!key || historyRequest.chartLoading || !state.status.ready?.[key]) return;
     const parameters = [...el.chartParameters.selectedOptions].map((option) => option.value);
     if (!parameters.length) {
       showToast("Select at least one chart parameter.", true);
@@ -483,7 +533,7 @@
       showToast("Select up to 8 parameters so the chart remains readable.", true);
       return;
     }
-    state.history.chartLoading = true;
+    historyRequest.chartLoading = true;
     el.loadChart.disabled = true;
     el.chartStatus.textContent = "Preparing chart points…";
     historyChart.clear("Loading chart data…");
@@ -495,16 +545,17 @@
         end: el.historyTo.value || null,
         max_points: 12000
       });
+      if (state.history !== historyRequest) return;
       if (!result.ready) {
         updateWorkers(result.status);
         el.chartStatus.textContent = "History indexing is still in progress.";
         return;
       }
       const units = Object.fromEntries(
-        state.history.data.parameters.map((parameter) => [parameter.name, parameter.unit])
+        historyRequest.data.parameters.map((parameter) => [parameter.name, parameter.unit])
       );
       historyChart.setData(result.rows, parameters, units);
-      state.history.chartLoaded = true;
+      historyRequest.chartLoaded = true;
       el.resetChart.disabled = result.rows.length < 2;
       el.viewSelectedRange.disabled = result.rows.length < 2;
       el.chartPng.disabled = !result.rows.length;
@@ -516,8 +567,8 @@
       el.chartStatus.textContent = error.message;
       showToast(error.message, true);
     } finally {
-      state.history.chartLoading = false;
-      el.loadChart.disabled = false;
+      historyRequest.chartLoading = false;
+      if (state.history === historyRequest) el.loadChart.disabled = false;
     }
   }
 
@@ -980,10 +1031,30 @@
   document.querySelectorAll(".tab").forEach((button) =>
     button.addEventListener("click", () => selectTab(button.dataset.tab)));
   el.historyApply.addEventListener("click", () => {
-    state.history.offset = 0;
-    state.history.chartLoaded = false;
+    if (!el.historyFrom.checkValidity() || !el.historyTo.checkValidity()) {
+      (el.historyFrom.checkValidity() ? el.historyTo : el.historyFrom).reportValidity();
+      return;
+    }
+    if (el.historyFrom.value && el.historyTo.value && el.historyFrom.value > el.historyTo.value) {
+      showToast("From date and time must be earlier than To date and time.", true);
+      return;
+    }
+    const current = state.historyRanges[state.history.memory] || {};
+    state.historyRanges[state.history.memory] = {
+      ...current,
+      from: el.historyFrom.value,
+      to: el.historyTo.value
+    };
+    state.history = {
+      ...state.history,
+      offset: 0,
+      loading: false,
+      chartLoaded: false,
+      chartLoading: false
+    };
+    el.chartPng.disabled = true;
+    el.chartPdf.disabled = true;
     loadHistory(false);
-    loadHistoryChart();
   });
   el.historyLimit.addEventListener("change", () => { state.history.offset = 0; loadHistory(false); });
   el.historyPrevious.addEventListener("click", () => {

@@ -4,11 +4,16 @@
   const rowIndex = Number(new URLSearchParams(location.search).get("row"));
   let detail = null;
   const expanded = new Set();
+  const selectedParameters = new Set();
+  let draftSelection = new Set();
   const el = Object.fromEntries([
     "closeWindow", "detailCsv", "detailHtml", "faultCard", "faultTime", "faultCode", "faultDmc",
     "faultRole", "faultMessage", "faultMeta", "detailContent", "windowDescription", "parameterCount",
-    "sampleStrip", "parameterSearch", "showAllParameters", "fdpHead", "fdpBody", "notRetained",
-    "detailError", "loadingOverlay", "detailLoadingText", "detailProgress", "toast"
+    "sampleStrip", "parameterSearch", "selectionStatus", "openParameterPicker", "fdpHead", "fdpBody",
+    "parameterPicker", "closeParameterPicker", "pickerSearch", "selectMatchingParameters",
+    "clearParameterSelection", "pickerList", "pickerCount", "cancelParameterPicker",
+    "applyParameterSelection", "notRetained", "detailError", "loadingOverlay", "detailLoadingText",
+    "detailProgress", "toast"
   ].map((id) => [id, document.getElementById(id)]));
 
   const api = (endpoint, payload = null, method = "POST") =>
@@ -60,12 +65,99 @@
     return td;
   }
 
+  function matchingParameterIndexes() {
+    const query = el.pickerSearch.value.trim().toLocaleLowerCase();
+    const matches = [];
+    detail.parameters.forEach((parameter, index) => {
+      if (!query || parameter.name.toLocaleLowerCase().includes(query) ||
+          parameter.children.some((child) => child.name.toLocaleLowerCase().includes(query))) {
+        matches.push(index);
+      }
+    });
+    return matches;
+  }
+
+  function updatePickerCount(visibleCount = matchingParameterIndexes().length) {
+    el.pickerCount.textContent = `${draftSelection.size.toLocaleString()} of ${detail.parameters.length.toLocaleString()} selected · ${visibleCount.toLocaleString()} matching`;
+    el.selectMatchingParameters.disabled = visibleCount === 0;
+    el.selectMatchingParameters.textContent = visibleCount === detail.parameters.length
+      ? "Select all"
+      : `Select matching (${visibleCount.toLocaleString()})`;
+    el.applyParameterSelection.textContent = draftSelection.size
+      ? `Show ${draftSelection.size.toLocaleString()} selected`
+      : "Show empty table";
+  }
+
+  function renderParameterPicker() {
+    if (!detail?.retained) return;
+    const query = el.pickerSearch.value.trim().toLocaleLowerCase();
+    const indexes = matchingParameterIndexes();
+    const fragment = document.createDocumentFragment();
+    indexes.forEach((index) => {
+      const parameter = detail.parameters[index];
+      const item = document.createElement("label");
+      item.className = "parameter-picker-item";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.parameterIndex = String(index);
+      checkbox.checked = draftSelection.has(index);
+      const copy = document.createElement("span");
+      const name = document.createElement("strong");
+      name.textContent = parameter.name;
+      const meta = document.createElement("small");
+      const matchingChildren = query
+        ? parameter.children.filter((child) => child.name.toLocaleLowerCase().includes(query))
+        : [];
+      if (matchingChildren.length && !parameter.name.toLocaleLowerCase().includes(query)) {
+        meta.textContent = `Sub-signal: ${matchingChildren.slice(0, 2).map((child) => child.name).join(", ")}${matchingChildren.length > 2 ? "…" : ""}`;
+      } else {
+        meta.textContent = `${parameter.unit || "No unit"} · ${parameter.children.length.toLocaleString()} sub-signals`;
+      }
+      copy.append(name, meta);
+      item.append(checkbox, copy);
+      fragment.appendChild(item);
+    });
+    if (!indexes.length) {
+      const empty = document.createElement("p");
+      empty.className = "parameter-picker-empty";
+      empty.textContent = "No parameter or sub-signal matches this search.";
+      fragment.appendChild(empty);
+    }
+    el.pickerList.replaceChildren(fragment);
+    updatePickerCount(indexes.length);
+  }
+
+  function openParameterPicker() {
+    if (!detail?.retained) return;
+    draftSelection = new Set(selectedParameters);
+    el.pickerSearch.value = "";
+    renderParameterPicker();
+    el.parameterPicker.showModal();
+    el.pickerSearch.focus();
+  }
+
+  function closeParameterPicker() {
+    if (el.parameterPicker.open) el.parameterPicker.close();
+  }
+
+  function selectedParameterEntries() {
+    return detail.parameters
+      .map((parameter, index) => ({ parameter, index }))
+      .filter(({ index }) => selectedParameters.has(index));
+  }
+
+  function updateSelectionState() {
+    const selectedCount = selectedParameters.size;
+    el.selectionStatus.textContent = `${selectedCount.toLocaleString()} of ${detail.parameters.length.toLocaleString()} parameters selected`;
+    el.parameterSearch.disabled = selectedCount === 0;
+    el.detailCsv.disabled = selectedCount === 0;
+    el.detailHtml.disabled = selectedCount === 0;
+  }
+
   function renderTable() {
     if (!detail?.retained) return;
     const query = el.parameterSearch.value.trim().toLocaleLowerCase();
-    const showAll = el.showAllParameters.checked;
-    const parameters = detail.parameters.filter((parameter) => {
-      if (!showAll && !parameter.visible) return false;
+    const parameters = selectedParameterEntries().map(({ parameter }) => parameter).filter((parameter) => {
       if (!query) return true;
       if (parameter.name.toLocaleLowerCase().includes(query)) return true;
       return parameter.children.some((child) => child.name.toLocaleLowerCase().includes(query));
@@ -102,7 +194,6 @@
       const showChildren = expanded.has(parameter.name) || (query && parameter.children.some((child) => child.name.toLocaleLowerCase().includes(query)));
       if (showChildren) {
         parameter.children
-          .filter((child) => showAll || child.visible)
           .filter((child) => !query || parameter.name.toLocaleLowerCase().includes(query) || child.name.toLocaleLowerCase().includes(query))
           .forEach((child) => {
             const childRow = document.createElement("tr"); childRow.className = "flag-child-row";
@@ -112,15 +203,25 @@
           });
       }
     });
+    if (!parameters.length) {
+      const emptyRow = document.createElement("tr");
+      const emptyCell = cell(selectedParameters.size
+        ? "No selected parameter matches this search."
+        : "No parameters selected. Click Select parameters to choose the readings you need.", "fdp-empty-cell");
+      emptyCell.colSpan = detail.samples.length + 2;
+      emptyRow.appendChild(emptyCell);
+      fragment.appendChild(emptyRow);
+    }
     el.fdpBody.replaceChildren(fragment);
     const childCount = parameters.reduce((total, parameter) => total + parameter.children.length, 0);
-    el.parameterCount.textContent = `${parameters.length.toLocaleString()} parameters · ${childCount.toLocaleString()} defined sub-signals`;
+    el.parameterCount.textContent = `${parameters.length.toLocaleString()} displayed · ${childCount.toLocaleString()} available sub-signals`;
+    updateSelectionState();
   }
 
   function exportRows() {
     const headers = ["Parameter", "Unit", ...detail.samples.map((sample) => `${sample.label} ${sample.timestamp}`)];
     const rows = [];
-    detail.parameters.forEach((parameter) => {
+    selectedParameterEntries().forEach(({ parameter }) => {
       rows.push([parameter.name, parameter.unit, ...detail.samples.map((sample) => valueAt(sample, parameter))]);
       parameter.children.forEach((child) => {
         rows.push([`Bit ${child.bit_position}: ${child.name}`, child.unit, ...detail.samples.map((sample) => childValue(sample, parameter, child))]);
@@ -151,7 +252,8 @@
   }
 
   async function exportHtml() {
-    const parameters = detail.parameters.map((parameter) => [
+    const selected = selectedParameterEntries().map(({ parameter }) => parameter);
+    const parameters = selected.map((parameter) => [
       parameter.name,
       parameter.unit,
       parameter.visible ? 1 : 0,
@@ -164,7 +266,7 @@
       sample.label,
       sample.timestamp,
       sample.row_index == null ? 0 : 1,
-      detail.parameters.map((parameter) => {
+      selected.map((parameter) => {
         if (sample.row_index == null || !sample.values) return null;
         const value = sample.values[parameter.name];
         const meaning = sample.display?.[parameter.name];
@@ -216,10 +318,9 @@
     }
     el.windowDescription.textContent = `${result.config.previous_seconds} seconds before + occurrence + fault instant + ${result.config.next_seconds} seconds after · ${result.config.resolution_ms} ms resolution`;
     renderSamples();
-    renderTable();
     el.detailContent.hidden = false;
-    el.detailCsv.disabled = false;
-    el.detailHtml.disabled = false;
+    renderTable();
+    setTimeout(openParameterPicker, 0);
   }
 
   async function load() {
@@ -252,7 +353,41 @@
 
   el.closeWindow.addEventListener("click", () => window.MedhaDesktop.closeWindow());
   el.parameterSearch.addEventListener("input", renderTable);
-  el.showAllParameters.addEventListener("change", renderTable);
+  el.openParameterPicker.addEventListener("click", openParameterPicker);
+  el.closeParameterPicker.addEventListener("click", closeParameterPicker);
+  el.cancelParameterPicker.addEventListener("click", closeParameterPicker);
+  el.parameterPicker.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeParameterPicker();
+  });
+  el.pickerSearch.addEventListener("input", renderParameterPicker);
+  el.pickerList.addEventListener("change", (event) => {
+    const checkbox = event.target.closest("input[data-parameter-index]");
+    if (!checkbox) return;
+    const index = Number(checkbox.dataset.parameterIndex);
+    if (checkbox.checked) draftSelection.add(index); else draftSelection.delete(index);
+    updatePickerCount();
+  });
+  el.selectMatchingParameters.addEventListener("click", () => {
+    matchingParameterIndexes().forEach((index) => draftSelection.add(index));
+    renderParameterPicker();
+  });
+  el.clearParameterSelection.addEventListener("click", () => {
+    draftSelection.clear();
+    renderParameterPicker();
+  });
+  el.applyParameterSelection.addEventListener("click", () => {
+    selectedParameters.clear();
+    draftSelection.forEach((index) => selectedParameters.add(index));
+    const selectedNames = new Set(selectedParameterEntries().map(({ parameter }) => parameter.name));
+    [...expanded].forEach((name) => { if (!selectedNames.has(name)) expanded.delete(name); });
+    el.parameterSearch.value = "";
+    closeParameterPicker();
+    renderTable();
+    showToast(selectedParameters.size
+      ? `${selectedParameters.size.toLocaleString()} parameters displayed`
+      : "No parameters selected");
+  });
   el.detailCsv.addEventListener("click", exportCsv);
   el.detailHtml.addEventListener("click", exportHtml);
   load();

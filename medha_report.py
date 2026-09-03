@@ -50,12 +50,12 @@ _HTML_PREFIX = b"""<!doctype html>
   <section class="summary card" aria-label="Report summary">
     <div class="metric"><span>Fault log rows</span><b id="faultTotal">--</b></div>
     <div class="metric"><span>Faults with FDP</span><b id="retainedTotal">--</b></div>
-    <div class="metric"><span>Retained FDP records</span><b id="recordTotal">--</b></div>
+    <div class="metric"><span>FDP samples included</span><b id="recordTotal">--</b></div>
     <div class="metric"><span>FDP parameters</span><b id="parameterTotal">--</b></div>
     <div class="metric"><span>Report source</span><b id="archiveName" style="font-size:14px">--</b></div>
   </section>
   <section class="fault-card card">
-    <div class="toolbar"><h2>Complete fault log</h2><input id="faultSearch" class="search" type="search" placeholder="Search date, code, description, DMC or role"><span id="faultCount" class="count"></span></div>
+    <div class="toolbar"><h2>Fault log</h2><input id="faultSearch" class="search" type="search" placeholder="Search date, code, description, DMC or role"><span id="faultCount" class="count"></span></div>
     <div class="fault-head"><span>Date and time</span><span>Fault code</span><span>Description</span><span>DMC</span><span>Role</span><span>FDP</span></div>
     <div id="faultViewport" class="fault-viewport"><div id="faultSpacer" class="fault-spacer"><div id="faultRows" class="fault-rows"></div></div></div>
   </section>
@@ -73,7 +73,7 @@ _HTML_PREFIX = b"""<!doctype html>
     </div>
   </section>
 </main>
-<div id="loading" class="loading"><div class="loading-box card"><h2>Opening fault report</h2><p>Decompressing the complete Fault Log and retained FDP environment data locally...</p><div class="bar"></div></div></div>
+<div id="loading" class="loading"><div class="loading-box card"><h2>Opening fault report</h2><p>Decompressing the main Fault Log and retained FDP environment data locally...</p><div class="bar"></div></div></div>
 <script id="medha-payload" type="application/octet-stream">"""
 
 
@@ -159,10 +159,10 @@ def build_fault_fdp_html(
     """Return a compact offline HTML report and generation statistics.
 
     ``service`` is an archive-loaded :class:`medha_service.AnalysisService`.
-    The returned payload contains the complete fault log, every retained raw
-    FDP record decoded for every stored FDP parameter, and every fault-to-FDP
-    snapshot variant.  Large cell data is JSON column-major and is never held
-    as one uncompressed report object.
+    The returned payload contains the definition-visible fault log shown by
+    default in the main browser, every FDP sample referenced by those faults,
+    and every associated snapshot variant. Large cell data is JSON
+    column-major and is never held as one uncompressed report object.
     """
 
     _notify(progress_callback, 0.0)
@@ -176,14 +176,20 @@ def build_fault_fdp_html(
         # so this public report function remains correct when invoked directly.
         service._ensure_fdp()
         decoder = service.require_decoder()
-        faults = [dict(row) for row in service.fault_rows]
+        # Match the main Fault Log's default view. Definition-hidden and
+        # undefined rows remain available in the app's optional checkbox, but
+        # are deliberately omitted from this lightweight shareable report.
+        faults = [
+            dict(row)
+            for row in reversed(service.fault_rows)
+            if row.get("visible")
+        ]
         snapshot_lookup = {
             (str(key[0]), int(key[1])): tuple(int(index) for index in matches)
             for key, matches in (service.snapshot_lookup or {}).items()
         }
         archive_name = service.archive_path.name if service.archive_path else "ALL data"
         raw_records = decoder.raw_records("FDP")
-        raw_timestamps = [record.timestamp.isoformat(sep=" ") for record in raw_records]
         parameter_rows = list(decoder.parameter_metadata("FDP"))
         flag_rows = decoder.flag_metadata("FDP")
         config = decoder.fdp_window_config()
@@ -244,6 +250,36 @@ def build_fault_fdp_html(
 
         retained_fault_count = sum(index >= 0 for index in fault_environment_ids)
         snapshot_variant_count = sum(len(group) for group in environments)
+
+        # Only FDP rows reachable from a displayed fault are serialized. Remap
+        # their original decoder indexes to a dense report-local sequence.
+        included_row_indices = sorted(
+            {
+                row_index
+                for group in environments
+                for variant in group
+                for row_index in variant
+                if row_index >= 0
+            }
+        )
+        report_row_index = {
+            source_index: report_index
+            for report_index, source_index in enumerate(included_row_indices)
+        }
+        environments = [
+            [
+                [
+                    report_row_index[row_index] if row_index >= 0 else -1
+                    for row_index in variant
+                ]
+                for variant in group
+            ]
+            for group in environments
+        ]
+        raw_timestamps = [
+            raw_records[row_index].timestamp.isoformat(sep=" ")
+            for row_index in included_row_indices
+        ]
         _notify(progress_callback, 0.075)
 
         fault_column_names = (
@@ -297,7 +333,6 @@ def build_fault_fdp_html(
                 writer.write(',"d":[')
 
                 parameter_count = len(parameter_rows)
-                all_row_indices = range(len(raw_records))
                 for parameter_index, row in enumerate(parameter_rows):
                     if parameter_index:
                         writer.write(",")
@@ -305,7 +340,7 @@ def build_fault_fdp_html(
                     # Decode one parameter column at a time.  At most one FDP
                     # column and its sparse display messages exist in memory.
                     decoded = decoder.parameter_records(
-                        "FDP", (name,), row_indices=all_row_indices
+                        "FDP", (name,), row_indices=included_row_indices
                     )
                     values: list[object] = []
                     display_groups: dict[str, list[int]] = {}
@@ -314,7 +349,7 @@ def build_fault_fdp_html(
                         message = item["display"].get(name, "")
                         if message:
                             display_groups.setdefault(str(message), []).append(
-                                int(item["row_index"])
+                                report_row_index[int(item["row_index"])]
                             )
                     writer.write("[")
                     _write_json(writer, values)
@@ -334,7 +369,7 @@ def build_fault_fdp_html(
                 stats_values = [
                     len(faults),
                     retained_fault_count,
-                    len(raw_records),
+                    len(included_row_indices),
                     len(parameter_rows),
                     sub_signal_count,
                     len(environments),
@@ -362,7 +397,7 @@ def build_fault_fdp_html(
         stats: dict[str, object] = {
             "fault_count": len(faults),
             "retained_fault_count": retained_fault_count,
-            "fdp_record_count": len(raw_records),
+            "fdp_record_count": len(included_row_indices),
             "parameter_count": len(parameter_rows),
             "sub_signal_count": sub_signal_count,
             "environment_group_count": len(environments),

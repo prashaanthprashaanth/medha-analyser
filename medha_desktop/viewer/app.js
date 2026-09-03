@@ -97,7 +97,7 @@
       return;
     }
     el.faultHtml.disabled = true;
-    setLoading(true, "Building Fault + FDP HTML", "0% · Linking retained fault environments…", 0);
+    setLoading(true, "Building Fault Log + FDP HTML", "0% · Linking retained fault environments…", 0);
     let polling = false;
     const progressTimer = setInterval(async () => {
       if (polling) return;
@@ -105,14 +105,14 @@
       try {
         const status = await api("/status", null, "GET");
         const progress = Math.round(status.report?.progress || 0);
-        setLoading(true, "Building Fault + FDP HTML", `${progress}% · Compressing all faults and retained FDP data…`, progress);
+        setLoading(true, "Building Fault Log + FDP HTML", `${progress}% · Compressing visible faults and retained FDP data…`, progress);
       } catch { /* the active export request will surface any error */ }
       finally { polling = false; }
     }, 450);
     try {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const result = await window.MedhaDesktop.saveFaultFdpReport();
-      showToast(`Complete Fault + FDP HTML saved to ${result.destination}`);
+      showToast(`Fault Log + FDP HTML saved to ${result.destination}`);
     } catch (error) {
       showToast(error.message, true);
     } finally {

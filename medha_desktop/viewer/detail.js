@@ -310,7 +310,7 @@
   async function exportHtml() {
     el.detailHtml.disabled = true;
     el.loadingOverlay.hidden = false;
-    el.loadingOverlay.querySelector("h2").textContent = "Building all Fault + FDP HTML";
+    el.loadingOverlay.querySelector("h2").textContent = "Building Fault Log + FDP HTML";
     el.detailProgress.value = 0;
     el.detailLoadingText.textContent = "0% · Linking retained fault environments…";
     let polling = false;
@@ -321,14 +321,14 @@
         const status = await api("/status", null, "GET");
         const progress = Math.round(status.report?.progress || 0);
         el.detailProgress.value = progress;
-        el.detailLoadingText.textContent = `${progress}% · Compressing complete Fault + FDP data…`;
+        el.detailLoadingText.textContent = `${progress}% · Compressing visible faults and retained FDP data…`;
       } catch { /* the export request will report its own error */ }
       finally { polling = false; }
     }, 450);
     try {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const result = await window.MedhaDesktop.saveFaultFdpReport();
-      showToast(`Complete Fault + FDP HTML saved to ${result.destination}`);
+      showToast(`Fault Log + FDP HTML saved to ${result.destination}`);
     } catch (error) {
       showToast(error.message, true);
     } finally {

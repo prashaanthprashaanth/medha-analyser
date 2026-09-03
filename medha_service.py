@@ -200,7 +200,7 @@ class AnalysisService:
             self.report_progress = max(0.0, min(1.0, value))
 
     def fault_fdp_html_report(self) -> tuple[str, bytes, dict[str, object]]:
-        """Build or reuse the compact all-fault + retained-FDP offline report."""
+        """Build or reuse the visible-fault + retained-FDP offline report."""
 
         with self.lock:
             cached = self.report_cache

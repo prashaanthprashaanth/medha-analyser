@@ -196,6 +196,27 @@
     return download(payload.filename || "medha_chart.pdf", pdfWithJpeg(jpeg, canvas.width, canvas.height), "application/pdf");
   }
 
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[character]);
+  }
+
+  async function saveTablePdf(payload) {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) throw new Error("Allow pop-ups to create the table PDF");
+    const headers = Array.isArray(payload.headers) ? payload.headers.slice(0, 20) : [];
+    const rows = Array.isArray(payload.rows) ? payload.rows.slice(0, 5000) : [];
+    const head = headers.map((value) => `<th>${escapeHtml(value)}</th>`).join("");
+    const body = rows.map((row) => `<tr>${headers.map((_header, index) => `<td>${escapeHtml(row[index])}</td>`).join("")}</tr>`).join("");
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(payload.title)}</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Segoe UI,Arial;color:#183247;margin:0}header{text-align:center;margin-bottom:10px}h1{font-size:19px;color:#0b3b61;margin:0}h2{font-size:14px;color:#0c4f78;margin:8px 0 3px}p{font-size:8px;color:#637b8c}table{width:100%;border-collapse:collapse;font-size:7px}thead{display:table-header-group}th{padding:5px;color:#fff;background:#0c4f78;text-align:left;white-space:nowrap}td{padding:4px 5px;border:1px solid #d7e5ee;white-space:nowrap}tbody tr:nth-child(even){background:#f1f9fd}</style></head><body><header><h1>MEDHA DATA ANALYSER</h1><h2>${escapeHtml(payload.title)}</h2><p>${escapeHtml(payload.details)}</p></header><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`);
+    printWindow.document.close();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    printWindow.focus();
+    printWindow.print();
+    return { destination: "the browser print dialog" };
+  }
+
   window.MedhaDesktop = {
     api,
     startupArchive: async () => null,
@@ -211,7 +232,8 @@
     closeWindow: async () => { window.close(); },
     saveExport: async (filename, bytes) => download(filename, bytes),
     saveFaultFdpReport,
-    saveChartPdf
+    saveChartPdf,
+    saveTablePdf
   };
 
   if (location.pathname === "/" || location.pathname.endsWith("/index.html")) {

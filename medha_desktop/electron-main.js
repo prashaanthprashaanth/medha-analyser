@@ -335,6 +335,38 @@ ipcMain.handle("medha:save-chart-pdf", async (_event, payload) => {
   return { destination };
 });
 
+ipcMain.handle("medha:save-table-pdf", async (_event, payload) => {
+  const headers = Array.isArray(payload.headers) ? payload.headers.slice(0, 20) : [];
+  const rows = Array.isArray(payload.rows) ? payload.rows.slice(0, 5000) : [];
+  if (!headers.length || headers.length > 20 || rows.some((row) => !Array.isArray(row))) {
+    throw new Error("Invalid table data");
+  }
+  const destination = uniqueDownloadPath(payload.filename || "medha_table.pdf");
+  const reportWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  const head = headers.map((value) => `<th>${escapeHtml(value)}</th>`).join("");
+  const body = rows.map((row) => `<tr>${headers.map((_header, index) => `<td>${escapeHtml(row[index] ?? "")}</td>`).join("")}</tr>`).join("");
+  const document = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(payload.title)}</title><style>@page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}body{font-family:"Segoe UI",Arial;color:#183247;margin:0}header{text-align:center;margin-bottom:10px}h1{font-size:19px;letter-spacing:.06em;color:#0b3b61;margin:0}h2{font-size:14px;color:#0c4f78;margin:8px 0 3px}p{font-size:8px;color:#637b8c;margin:3px 0;overflow-wrap:anywhere}table{width:100%;border-collapse:collapse;font-size:7px}thead{display:table-header-group}th{padding:5px;color:#fff;background:#0c4f78;text-align:left;white-space:nowrap}td{padding:4px 5px;border:1px solid #d7e5ee;white-space:nowrap}tbody tr:nth-child(even){background:#f1f9fd}</style></head><body><header><h1>MEDHA DATA ANALYSER</h1><p>Developed by ELS/ED</p><h2>${escapeHtml(payload.title)}</h2><p>${escapeHtml(payload.details)}</p></header><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`;
+  try {
+    await reportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(document)}`);
+    const pdf = await reportWindow.webContents.printToPDF({
+      printBackground: true,
+      landscape: true,
+      pageSize: "A4",
+      margins: { top: 0.2, bottom: 0.2, left: 0.2, right: 0.2 }
+    });
+    await fsp.writeFile(destination, pdf);
+  } finally {
+    if (!reportWindow.isDestroyed()) reportWindow.destroy();
+  }
+  if (Notification.isSupported()) {
+    new Notification({ title: "Medha table PDF saved", body: path.basename(destination) }).show();
+  }
+  return { destination };
+});
+
 app.whenReady().then(async () => {
   try {
     await session.defaultSession.clearCache();

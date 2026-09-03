@@ -348,7 +348,7 @@ class AnalysisService:
         if not requested_parameters:
             raise FormatError("Select at least one FDP parameter")
         if len(requested_parameters) > 6:
-            raise FormatError("Select up to 6 parameters so comparison charts remain readable")
+            raise FormatError("Select up to 6 parameters so the comparison tables remain readable")
 
         metadata = {row["NAME"].casefold(): row for row in decoder.parameter_metadata("FDP")}
         selected_metadata = []
@@ -474,7 +474,13 @@ class AnalysisService:
         metadata = decoder.parameter_metadata(key)
         names = [row["NAME"] for row in metadata]
         selected = list(parameters) if parameters else names
-        rows = decoder.parameter_records(key, selected, indices)
+        metadata_by_name = {row["NAME"].casefold(): row for row in metadata}
+        try:
+            selected_metadata = [metadata_by_name[str(name).casefold()] for name in selected]
+        except KeyError as exc:
+            raise FormatError(f"Unknown {key} parameter: {exc.args[0]}") from exc
+        canonical_names = [row["NAME"] for row in selected_metadata]
+        rows = decoder.parameter_records(key, canonical_names, indices)
         return {
             "ready": True,
             "memory": key,
@@ -487,6 +493,10 @@ class AnalysisService:
             "parameters": [
                 {"name": row["NAME"], "unit": row["UNIT"], "visible": row["VISIBLE"].upper().startswith("T")}
                 for row in metadata
+            ],
+            "selected_parameters": [
+                {"name": row["NAME"], "unit": row["UNIT"], "visible": row["VISIBLE"].upper().startswith("T")}
+                for row in selected_metadata
             ],
             "rows": rows,
         }

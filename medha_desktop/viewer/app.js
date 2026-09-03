@@ -12,7 +12,7 @@
     status: { ready: {}, progress: {} },
     fdpSynced: false,
     currentTab: "faults",
-    history: { memory: null, offset: 0, limit: 500, data: null, loading: false, chartLoaded: false, chartLoading: false },
+    history: { memory: null, offset: 0, limit: 500, data: null, loading: false, chartLoaded: false, chartLoading: false, tableParameters: [] },
     historyRanges: { LGM: null, SHM: null },
     depth: {
       selected: new Set(), parameters: [], selectedParameters: new Set(),
@@ -32,7 +32,8 @@
     "historyLimit", "historyApply", "historySummary", "historyTable", "historyPrevious", "historyNext",
     "historyPageText", "overviewCards", "chartParameters", "loadChart", "resetChart",
     "viewSelectedRange", "chartStatus", "historyChart", "chartTooltip", "chartSelection",
-    "chartPng", "chartPdf", "depthTab", "depthView", "depthBadge", "depthClear",
+    "chartPng", "chartPdf", "historyShowSelected", "historyShowAll", "historyPdf",
+    "depthTab", "depthView", "depthBadge", "depthClear", "depthFaultSearch", "depthFaultMatch",
     "depthFaultList", "depthParameterSearch", "depthParameters", "depthRun", "depthProgress",
     "depthResults", "populationView", "populationCsv", "populationFrom", "populationTo",
     "populationHidden", "populationApply", "populationSummary", "populationContent", "historyExcel"
@@ -172,6 +173,7 @@
         state.fdpSynced = true;
         applyFaultFilters();
         updateSummary();
+        renderDepthSelection();
         if (state.currentTab === "population") renderPopulation();
       }
       const key = state.currentTab;
@@ -191,9 +193,11 @@
     state.depth.selected.clear();
     state.depth.parameters = [];
     state.depth.selectedParameters.clear();
+    el.depthFaultSearch.value = "";
+    el.depthResults.replaceChildren();
     state.history = {
       memory: null, offset: 0, limit: Number(el.historyLimit.value), data: null,
-      loading: false, chartLoaded: false, chartLoading: false
+      loading: false, chartLoaded: false, chartLoading: false, tableParameters: []
     };
     state.historyRanges = { LGM: null, SHM: null };
     el.historyFrom.value = "";
@@ -307,21 +311,6 @@
       row.tabIndex = 0;
       row.title = "Open diagnostic data in a separate window";
       row.append(
-        (() => {
-          const holder = document.createElement("span");
-          holder.className = "fault-compare-cell";
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.checked = state.depth.selected.has(Number(fault.row_index));
-          checkbox.disabled = fault.environment !== "Available";
-          checkbox.title = checkbox.disabled
-            ? "Comparison is available only when this retained FDP snapshot is ready"
-            : "Select this fault for Depth Analysis";
-          checkbox.addEventListener("click", (event) => event.stopPropagation());
-          checkbox.addEventListener("change", () => toggleDepthFault(fault, checkbox));
-          holder.appendChild(checkbox);
-          return holder;
-        })(),
         faultCell(fault.timestamp),
         faultCell(fault.fault_code),
         faultCell(fault.fault_message, "fault-message"),
@@ -378,7 +367,7 @@
     const rememberedRange = state.historyRanges[key];
     state.history = {
       memory: key, offset: 0, limit: Number(el.historyLimit.value), data: null,
-      loading: false, chartLoaded: false, chartLoading: false
+      loading: false, chartLoaded: false, chartLoading: false, tableParameters: []
     };
     el.historyFrom.value = rememberedRange?.from || "";
     el.historyTo.value = rememberedRange?.to || "";
@@ -395,6 +384,9 @@
     el.viewSelectedRange.disabled = true;
     el.chartPng.disabled = true;
     el.chartPdf.disabled = true;
+    el.historyPdf.disabled = true;
+    el.historyShowSelected.disabled = true;
+    el.historyShowAll.disabled = true;
     el.historyExcel.disabled = true;
     el.historyApply.disabled = true;
     el.historySummary.textContent = "The full available time range will be filled automatically.";
@@ -441,6 +433,7 @@
     try {
       const result = await api("/history", {
         memory: key,
+        parameters: historyRequest.tableParameters.length ? historyRequest.tableParameters : null,
         start: requestedFrom,
         end: requestedTo,
         offset: historyRequest.offset,
@@ -478,7 +471,10 @@
       showToast(error.message, true);
     } finally {
       historyRequest.loading = false;
-      if (state.history === historyRequest) el.historyApply.disabled = !historyRequest.data;
+      if (state.history === historyRequest) {
+        el.historyApply.disabled = !historyRequest.data;
+        updateHistoryParameterActions();
+      }
     }
   }
 
@@ -486,8 +482,9 @@
     updateHistoryWaiting();
     const tableHead = el.historyTable.querySelector("thead");
     const tableBody = el.historyTable.querySelector("tbody");
-    const names = data.parameters.map((parameter) => parameter.name);
-    const units = Object.fromEntries(data.parameters.map((parameter) => [parameter.name, parameter.unit]));
+    const displayedParameters = data.selected_parameters || data.parameters;
+    const names = displayedParameters.map((parameter) => parameter.name);
+    const units = Object.fromEntries(displayedParameters.map((parameter) => [parameter.name, parameter.unit]));
     const headings = ["Date & Time", ...names.map((name) => units[name] ? `${name} [${units[name]}]` : name)];
     const headRow = document.createElement("tr");
     headings.forEach((heading) => { const th = document.createElement("th"); th.textContent = heading; headRow.appendChild(th); });
@@ -499,7 +496,9 @@
       names.forEach((name) => {
         const td = document.createElement("td");
         const meaning = record.display[name];
-        td.textContent = meaning ? `${record.values[name]} — ${meaning}` : record.values[name];
+        const value = record.values[name];
+        td.textContent = value === undefined || value === null ? "—" : meaning ? `${value} — ${meaning}` : value;
+        if (value === undefined || value === null) td.className = "history-missing";
         row.appendChild(td);
       });
       fragment.appendChild(row);
@@ -507,25 +506,41 @@
     tableBody.replaceChildren(fragment);
     const start = data.matching_records ? data.offset + 1 : 0;
     const end = Math.min(data.offset + data.rows.length, data.matching_records);
-    el.historySummary.textContent = `${data.total_records.toLocaleString()} total records · showing ${start.toLocaleString()}–${end.toLocaleString()} of ${data.matching_records.toLocaleString()} in this time range`;
+    el.historySummary.textContent = `${data.total_records.toLocaleString()} total records · showing ${start.toLocaleString()}–${end.toLocaleString()} of ${data.matching_records.toLocaleString()} in this time range · ${names.length.toLocaleString()} parameter${names.length === 1 ? "" : "s"} in table`;
     const page = Math.floor(data.offset / data.limit) + 1;
     const pages = Math.max(1, Math.ceil(data.matching_records / data.limit));
     el.historyPageText.textContent = `Page ${page.toLocaleString()} of ${pages.toLocaleString()}`;
     el.historyPrevious.disabled = data.offset <= 0;
     el.historyNext.disabled = data.offset + data.rows.length >= data.matching_records;
     el.historyExcel.disabled = !data.rows.length;
+    el.historyPdf.disabled = !data.rows.length || names.length > 8;
+    el.historyPdf.title = names.length > 8 ? "Show up to 8 selected parameters in the table before creating a PDF" : "Download the displayed table as PDF";
+    updateHistoryParameterActions();
+  }
+
+  function historyDisplayParameters(data = state.history.data) {
+    return data ? (data.selected_parameters || data.parameters) : [];
+  }
+
+  function historyExportRows() {
+    const data = state.history.data;
+    const parameters = historyDisplayParameters(data);
+    const names = parameters.map((parameter) => parameter.name);
+    const headers = ["Date & Time", ...parameters.map((parameter) =>
+      parameter.unit ? `${parameter.name} [${parameter.unit}]` : parameter.name)];
+    const rows = data.rows.map((record) => [record.timestamp, ...names.map((name) => {
+      const value = record.values[name];
+      const meaning = record.display[name];
+      if (value === undefined || value === null) return "—";
+      return meaning ? `${value} — ${meaning}` : value;
+    })]);
+    return { headers, rows, parameters };
   }
 
   async function downloadHistoryExcel() {
     const data = state.history.data;
     if (!data?.rows?.length) return;
-    const names = data.parameters.map((parameter) => parameter.name);
-    const headers = ["Date & Time", ...data.parameters.map((parameter) =>
-      parameter.unit ? `${parameter.name} [${parameter.unit}]` : parameter.name)];
-    const rows = data.rows.map((record) => [record.timestamp, ...names.map((name) => {
-      const meaning = record.display[name];
-      return meaning ? `${record.values[name]} — ${meaning}` : record.values[name];
-    })]);
+    const { headers, rows } = historyExportRows();
     try {
       const memory = state.history.memory === "LGM" ? "Long Term" : "Short Term";
       const result = await saveExcel(
@@ -535,8 +550,32 @@
     } catch (error) { showToast(error.message, true); }
   }
 
+  async function downloadHistoryPdf() {
+    const data = state.history.data;
+    if (!data?.rows?.length) return;
+    const { headers, rows, parameters } = historyExportRows();
+    if (parameters.length > 8) {
+      showToast("Select up to 8 parameters and use ‘Show selected in table’ before downloading PDF.", true);
+      return;
+    }
+    try {
+      const memory = state.history.memory === "LGM" ? "Long-Term Data" : "Short-Term Data";
+      const result = await window.MedhaDesktop.saveTablePdf({
+        filename: `medha_${state.history.memory.toLowerCase()}_displayed_rows.pdf`,
+        title: `${memory} table`,
+        details: `${el.historySummary.textContent} · Range: ${el.historyFrom.value || "start"} to ${el.historyTo.value || "end"}`,
+        headers,
+        rows
+      });
+      showToast(`PDF saved to ${result.destination}`);
+    } catch (error) { showToast(error.message, true); }
+  }
+
   function populateChartParameters(parameters, memory) {
-    if (el.chartParameters.dataset.memory === memory && el.chartParameters.options.length) return;
+    if (el.chartParameters.dataset.memory === memory && el.chartParameters.options.length) {
+      updateHistoryParameterActions();
+      return;
+    }
     const visible = parameters.filter((parameter) => parameter.visible);
     const defaults = new Set(["Loco speed", "OHE Volt (KV)"]);
     const fragment = document.createDocumentFragment();
@@ -553,6 +592,31 @@
     }
     el.chartParameters.dataset.memory = memory;
     el.loadChart.disabled = false;
+    updateHistoryParameterActions();
+  }
+
+  function updateHistoryParameterActions() {
+    const count = el.chartParameters.selectedOptions.length;
+    const ready = Boolean(state.history.data) && !state.history.loading;
+    el.historyShowSelected.disabled = !ready || count < 1 || count > 8;
+    el.historyShowSelected.title = count > 8 ? "Select up to 8 parameters" : "Display only these parameters in the data table";
+    el.historyShowAll.disabled = !ready || !state.history.tableParameters.length;
+  }
+
+  function showHistoryTableParameters(showAll = false) {
+    if (!state.history.data || state.history.loading) return;
+    const selected = [...el.chartParameters.selectedOptions].map((option) => option.value);
+    if (!showAll && (!selected.length || selected.length > 8)) {
+      showToast("Select one to eight parameters for the history table.", true);
+      return;
+    }
+    state.history.tableParameters = showAll ? [] : selected;
+    state.history.offset = 0;
+    state.history.data = null;
+    el.historyExcel.disabled = true;
+    el.historyPdf.disabled = true;
+    updateHistoryParameterActions();
+    loadHistory(false);
   }
 
   async function loadHistoryChart() {
@@ -650,8 +714,77 @@
     } else {
       state.depth.selected.delete(rowIndex);
     }
+    el.depthResults.replaceChildren();
     renderDepthSelection();
-    renderVirtualFaults();
+  }
+
+  function depthFaultCandidates() {
+    const query = el.depthFaultSearch.value.trim().toLocaleLowerCase();
+    return state.faults
+      .filter((fault) => fault.environment === "Available")
+      .filter((fault) => !query || [fault.timestamp, fault.fault_code, fault.fault_message, fault.dmc, fault.mastership]
+        .join(" ").toLocaleLowerCase().includes(query))
+      .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+  }
+
+  function renderDepthFaultOptions() {
+    const scrollTop = el.depthFaultList.scrollTop;
+    const available = state.faults.filter((fault) => fault.environment === "Available").length;
+    const faults = depthFaultCandidates();
+    el.depthFaultSearch.disabled = !state.loaded || !state.status.ready?.FDP;
+    el.depthFaultMatch.textContent = state.status.ready?.FDP
+      ? `${faults.length.toLocaleString()} shown · ${available.toLocaleString()} retained`
+      : state.loaded ? "FDP indexing…" : "0 available";
+    if (!state.loaded || !state.status.ready?.FDP) {
+      const placeholder = document.createElement("p");
+      placeholder.className = "depth-placeholder";
+      placeholder.textContent = state.loaded
+        ? "Retained fault selection will be available when FDP indexing finishes."
+        : "Upload an ALL Data ZIP to choose up to 12 retained faults.";
+      el.depthFaultList.replaceChildren(placeholder);
+      return;
+    }
+    if (!faults.length) {
+      const placeholder = document.createElement("p");
+      placeholder.className = "depth-placeholder";
+      placeholder.textContent = available
+        ? "No retained faults match this search."
+        : "No retained fault snapshots are available in this archive.";
+      el.depthFaultList.replaceChildren(placeholder);
+      return;
+    }
+    const atLimit = state.depth.selected.size >= 12;
+    const fragment = document.createDocumentFragment();
+    faults.forEach((fault) => {
+      const rowIndex = Number(fault.row_index);
+      const selected = state.depth.selected.has(rowIndex);
+      const option = document.createElement("label");
+      option.className = "depth-fault-option";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selected;
+      checkbox.disabled = atLimit && !selected;
+      checkbox.title = checkbox.disabled ? "Clear one selected fault before adding another" : "Include in Depth Analysis";
+      checkbox.addEventListener("change", () => toggleDepthFault(fault, checkbox));
+      const timestamp = document.createElement("span");
+      timestamp.className = "depth-fault-time";
+      timestamp.textContent = fault.timestamp;
+      const code = document.createElement("span");
+      code.className = "depth-fault-code";
+      code.textContent = `#${fault.fault_code}`;
+      const copy = document.createElement("span");
+      copy.className = "depth-fault-copy";
+      const message = document.createElement("strong");
+      message.textContent = fault.fault_message;
+      message.title = fault.fault_message;
+      const metadata = document.createElement("small");
+      metadata.textContent = `DMC ${fault.dmc || "—"} · ${fault.mastership || "Role —"} · packet ${fault.packet_index ?? "—"}`;
+      copy.append(message, metadata);
+      option.append(checkbox, timestamp, code, copy);
+      fragment.appendChild(option);
+    });
+    el.depthFaultList.replaceChildren(fragment);
+    el.depthFaultList.scrollTop = scrollTop;
   }
 
   function renderDepthSelection() {
@@ -660,29 +793,8 @@
       .filter(Boolean);
     el.depthTab.textContent = `Depth Analysis (${faults.length})`;
     el.depthBadge.textContent = `${faults.length} fault${faults.length === 1 ? "" : "s"} selected`;
-    if (!faults.length) {
-      const placeholder = document.createElement("p");
-      placeholder.className = "depth-placeholder";
-      placeholder.textContent = "Use the Compare checkboxes in the Fault Log. Up to 12 retained faults can be selected.";
-      el.depthFaultList.replaceChildren(placeholder);
-    } else {
-      const fragment = document.createDocumentFragment();
-      faults.forEach((fault) => {
-        const item = document.createElement("div");
-        item.className = "depth-fault-item";
-        const timestamp = document.createElement("strong"); timestamp.textContent = fault.timestamp;
-        const code = document.createElement("span"); code.textContent = `#${fault.fault_code}`;
-        const message = document.createElement("span"); message.textContent = fault.fault_message; message.title = fault.fault_message;
-        const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "×"; remove.title = "Remove from comparison";
-        remove.addEventListener("click", () => {
-          state.depth.selected.delete(Number(fault.row_index));
-          renderDepthSelection();
-          renderVirtualFaults();
-        });
-        item.append(timestamp, code, message, remove); fragment.appendChild(item);
-      });
-      el.depthFaultList.replaceChildren(fragment);
-    }
+    el.depthClear.disabled = !faults.length;
+    renderDepthFaultOptions();
     const parameterCount = state.depth.selectedParameters.size;
     el.depthRun.disabled = faults.length < 2 || parameterCount < 1 || state.depth.comparisonLoading;
     if (!state.depth.comparisonLoading) {
@@ -739,11 +851,12 @@
     shown.forEach((option) => state.depth.selectedParameters.delete(option.value));
     const chosen = shown.filter((option) => option.selected);
     if (state.depth.selectedParameters.size + chosen.length > 6) {
-      showToast("Select up to 6 parameters for readable pattern charts.", true);
+      showToast("Select up to 6 parameters so the detailed tables remain readable.", true);
     }
     chosen.slice(0, Math.max(0, 6 - state.depth.selectedParameters.size))
       .forEach((option) => state.depth.selectedParameters.add(option.value));
     shown.forEach((option) => { option.selected = state.depth.selectedParameters.has(option.value); });
+    el.depthResults.replaceChildren();
     renderDepthSelection();
   }
 
@@ -768,76 +881,282 @@
     }
   }
 
-  const COMPARISON_COLORS = ["#0876b9", "#ef8354", "#1c9b73", "#8b6bc8", "#d5a021", "#d64f73", "#4f6f8f", "#25a9b7", "#a95b32", "#627f35", "#805c9d", "#bb4265"];
+  const COMPARISON_COLORS = ["#0876b9", "#d36734", "#168464", "#7555b2", "#a86f00", "#c34568", "#4f6f8f", "#138796", "#99502b", "#58752f", "#74528e", "#aa3e5e"];
+
+  function presentValue(sample, parameterName) {
+    const value = sample?.values?.[parameterName];
+    if (value === undefined || value === null || value === "") return "—";
+    const meaning = sample?.display?.[parameterName];
+    return meaning ? `${value} — ${meaning}` : String(value);
+  }
+
+  function numericValue(sample, parameterName) {
+    const raw = sample?.values?.[parameterName];
+    if (raw === undefined || raw === null || raw === "") return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function mean(values) {
+    return values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
+  }
+
+  function formatMetric(value) {
+    if (!Number.isFinite(value)) return "—";
+    return Number(value.toFixed(3)).toLocaleString("en-IN", { maximumFractionDigits: 3 });
+  }
+
+  function deltaMetric(from, to) {
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return { text: "—", className: "metric-missing" };
+    const delta = to - from;
+    if (Math.abs(delta) < 1e-12) return { text: "No change", className: "metric-steady" };
+    const percent = Math.abs(from) > 1e-12 ? ` (${delta > 0 ? "+" : ""}${formatMetric(delta / Math.abs(from) * 100)}%)` : "";
+    return {
+      text: `${delta > 0 ? "↑ +" : "↓ "}${formatMetric(delta)}${percent}`,
+      className: delta > 0 ? "metric-up" : "metric-down"
+    };
+  }
+
+  function tableCell(spec, tag = "td") {
+    const cell = document.createElement(tag);
+    if (spec && typeof spec === "object" && !(spec instanceof Node)) {
+      if (spec.className) cell.className = spec.className;
+      if (spec.node) cell.appendChild(spec.node);
+      else cell.textContent = spec.text ?? "";
+    } else if (spec instanceof Node) {
+      cell.appendChild(spec);
+    } else {
+      cell.textContent = spec ?? "";
+    }
+    return cell;
+  }
+
+  function analysisTable(headers, rows, extraClass = "") {
+    const wrap = document.createElement("div");
+    wrap.className = "analysis-table-scroll";
+    const table = document.createElement("table");
+    table.className = `analysis-table ${extraClass}`.trim();
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    headers.forEach((header) => headRow.appendChild(tableCell(header, "th")));
+    thead.appendChild(headRow);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      if (row.className) tr.className = row.className;
+      row.cells.forEach((cell) => tr.appendChild(tableCell(cell)));
+      tbody.appendChild(tr);
+    });
+    table.append(thead, tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  function analysisBlock(title, table) {
+    const block = document.createElement("section");
+    block.className = "analysis-block";
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    block.append(heading, table);
+    return block;
+  }
+
+  function referenceChip(index) {
+    const chip = document.createElement("span");
+    chip.className = "ref-chip";
+    chip.style.setProperty("--fault-color", COMPARISON_COLORS[index % COMPARISON_COLORS.length]);
+    chip.textContent = `F${index + 1}`;
+    return chip;
+  }
+
+  function sampleAt(item, label) {
+    return item.samples.find((sample) => sample.label === label);
+  }
+
+  function numericStats(item, parameterName) {
+    const before = item.samples.filter((sample) => Number(sample.relative_seconds) < 0)
+      .map((sample) => numericValue(sample, parameterName)).filter(Number.isFinite);
+    const after = item.samples.filter((sample) => Number(sample.relative_seconds) > 0)
+      .map((sample) => numericValue(sample, parameterName)).filter(Number.isFinite);
+    const all = item.samples.map((sample) => numericValue(sample, parameterName)).filter(Number.isFinite);
+    return {
+      before: mean(before), after: mean(after),
+      occurrence: numericValue(sampleAt(item, "Occurrence"), parameterName),
+      instant: numericValue(sampleAt(item, "Fault instant"), parameterName),
+      minimum: all.length ? Math.min(...all) : null,
+      maximum: all.length ? Math.max(...all) : null,
+      available: all.length,
+      total: item.samples.length
+    };
+  }
+
+  function stateSequence(samples, parameterName) {
+    const states = [];
+    samples.forEach((sample) => {
+      const value = presentValue(sample, parameterName);
+      if (value !== "—" && states.at(-1) !== value) states.push(value);
+    });
+    return states;
+  }
+
+  function renderFaultReference(faults) {
+    const card = document.createElement("section");
+    card.className = "comparison-key";
+    const title = document.createElement("h3");
+    title.textContent = "Fault reference key";
+    const rows = faults.map((item, index) => ({ cells: [
+      referenceChip(index),
+      { text: item.fault.timestamp, className: "fault-label-cell" },
+      { text: `#${item.fault.fault_code}`, className: "fault-code-cell" },
+      item.fault.fault_message,
+      item.fault.dmc || "—",
+      item.fault.mastership || "—",
+      item.fault.packet_index ?? "—"
+    ] }));
+    card.append(title, analysisTable(["Reference", "Date & Time", "Fault code", "Description", "DMC", "Role", "Packet"], rows, "fault-key-table"));
+    return card;
+  }
+
+  function renderNumericParameter(parameter, faults) {
+    const stats = faults.map((item) => numericStats(item, parameter.name));
+    const summaryRows = faults.map((item, index) => {
+      const stat = stats[index];
+      return { cells: [
+        referenceChip(index),
+        { text: `#${item.fault.fault_code}`, className: "fault-code-cell" },
+        item.fault.timestamp,
+        formatMetric(stat.before),
+        presentValue(sampleAt(item, "Occurrence"), parameter.name),
+        presentValue(sampleAt(item, "Fault instant"), parameter.name),
+        formatMetric(stat.after),
+        deltaMetric(stat.before, stat.instant),
+        deltaMetric(stat.instant, stat.after),
+        formatMetric(stat.minimum),
+        formatMetric(stat.maximum),
+        formatMetric(Number.isFinite(stat.minimum) && Number.isFinite(stat.maximum) ? stat.maximum - stat.minimum : null),
+        `${stat.available}/${stat.total}`
+      ] };
+    });
+    const instantValues = stats.map((stat, index) => ({ value: stat.instant, index })).filter((item) => Number.isFinite(item.value));
+    const shifts = stats.map((stat, index) => ({
+      ...deltaMetric(stat.before, stat.instant),
+      amount: Number.isFinite(stat.before) && Number.isFinite(stat.instant) ? Math.abs(stat.instant - stat.before) : null,
+      index
+    }))
+      .filter((item) => Number.isFinite(item.amount));
+    const largestShift = shifts.sort((left, right) => right.amount - left.amount)[0];
+    const totalSamples = stats.reduce((total, stat) => total + stat.total, 0);
+    const availableSamples = stats.reduce((total, stat) => total + stat.available, 0);
+    const instantNumbers = instantValues.map((item) => item.value);
+    const groupRows = [
+      { cells: [{ text: "Fault windows", className: "metric-name" }, faults.length.toLocaleString(), "Selected retained FDP windows"] },
+      { cells: [{ text: "Fault-instant mean", className: "metric-name" }, formatMetric(mean(instantNumbers)), `${instantValues.length}/${faults.length} instant readings available`] },
+      { cells: [{ text: "Fault-instant spread", className: "metric-name" }, instantNumbers.length ? formatMetric(Math.max(...instantNumbers) - Math.min(...instantNumbers)) : "—", instantNumbers.length ? `${formatMetric(Math.min(...instantNumbers))} to ${formatMetric(Math.max(...instantNumbers))}` : "No comparable readings"] },
+      { cells: [{ text: "Largest pre-to-instant shift", className: "metric-name" }, largestShift || { text: "—", className: "metric-missing" }, largestShift ? `F${largestShift.index + 1} · #${faults[largestShift.index].fault.fault_code}` : "No comparable readings"] },
+      { cells: [{ text: "Missing readings", className: "metric-name" }, (totalSamples - availableSamples).toLocaleString(), `${availableSamples}/${totalSamples} sample cells available`] }
+    ];
+    return {
+      statsTable: analysisTable(["Ref", "Fault", "Timestamp", "Pre avg", "Occurrence", "Fault instant", "Post avg", "Δ pre → instant", "Δ instant → post", "Minimum", "Maximum", "Range", "Samples"], summaryRows, "parameter-summary-table"),
+      groupTable: analysisTable(["Cross-fault metric", "Value", "Interpretation"], groupRows, "group-summary-table")
+    };
+  }
+
+  function renderCategoricalParameter(parameter, faults) {
+    const sequences = faults.map((item) => stateSequence(item.samples, parameter.name));
+    const rows = faults.map((item, index) => {
+      const before = stateSequence(item.samples.filter((sample) => Number(sample.relative_seconds) < 0), parameter.name);
+      const after = stateSequence(item.samples.filter((sample) => Number(sample.relative_seconds) > 0), parameter.name);
+      const available = item.samples.filter((sample) => presentValue(sample, parameter.name) !== "—").length;
+      return { cells: [
+        referenceChip(index),
+        { text: `#${item.fault.fault_code}`, className: "fault-code-cell" },
+        item.fault.timestamp,
+        before.join(" → ") || { text: "—", className: "metric-missing" },
+        presentValue(sampleAt(item, "Occurrence"), parameter.name),
+        presentValue(sampleAt(item, "Fault instant"), parameter.name),
+        after.join(" → ") || { text: "—", className: "metric-missing" },
+        { text: `${Math.max(0, sequences[index].length - 1)} state change${sequences[index].length === 2 ? "" : "s"}`, className: sequences[index].length > 1 ? "metric-up" : "metric-steady" },
+        `${available}/${item.samples.length}`
+      ] };
+    });
+    const instantStates = faults.map((item) => presentValue(sampleAt(item, "Fault instant"), parameter.name)).filter((value) => value !== "—");
+    const uniqueInstantStates = [...new Set(instantStates)];
+    const mostChanges = sequences.map((sequence, index) => ({ changes: Math.max(0, sequence.length - 1), index })).sort((left, right) => right.changes - left.changes)[0];
+    const available = faults.reduce((total, item) => total + item.samples.filter((sample) => presentValue(sample, parameter.name) !== "—").length, 0);
+    const total = faults.reduce((sum, item) => sum + item.samples.length, 0);
+    const groupRows = [
+      { cells: [{ text: "Fault-instant agreement", className: "metric-name" }, uniqueInstantStates.length === 1 ? { text: "Same state", className: "metric-steady" } : { text: `${uniqueInstantStates.length} states`, className: "metric-up" }, uniqueInstantStates.join(" | ") || "No instant readings"] },
+      { cells: [{ text: "Most state changes", className: "metric-name" }, mostChanges?.changes ?? 0, mostChanges ? `F${mostChanges.index + 1} · #${faults[mostChanges.index].fault.fault_code}` : "—"] },
+      { cells: [{ text: "Missing readings", className: "metric-name" }, (total - available).toLocaleString(), `${available}/${total} sample cells available`] }
+    ];
+    return {
+      statsTable: analysisTable(["Ref", "Fault", "Timestamp", "Pre-fault sequence", "Occurrence", "Fault instant", "Post-fault sequence", "Window activity", "Samples"], rows, "parameter-summary-table"),
+      groupTable: analysisTable(["Cross-fault metric", "Value", "Interpretation"], groupRows, "group-summary-table")
+    };
+  }
+
+  function renderSampleMatrix(parameter, faults) {
+    const labels = [];
+    faults.forEach((item) => item.samples.forEach((sample) => {
+      if (!labels.includes(sample.label)) labels.push(sample.label);
+    }));
+    const headers = ["Sample", ...faults.map((item, index) => ({ node: referenceChip(index), text: `F${index + 1} · #${item.fault.fault_code}` }))];
+    const rows = labels.map((label) => ({
+      className: label === "Fault instant" ? "sample-instant" : label === "Occurrence" ? "sample-landmark" : "",
+      cells: [
+        { text: label, className: "metric-name" },
+        ...faults.map((item) => {
+          const value = presentValue(sampleAt(item, label), parameter.name);
+          return value === "—" ? { text: value, className: "metric-missing" } : value;
+        })
+      ]
+    }));
+    return analysisTable(headers, rows, "sample-matrix-table");
+  }
 
   function renderDepthComparison(result) {
     const retained = result.faults.filter((item) => item.retained);
     const missing = result.faults.length - retained.length;
-    el.depthProgress.textContent = `${retained.length} retained fault windows compared${missing ? ` · ${missing} selected fault snapshots were no longer retained` : ""}.`;
+    el.depthProgress.textContent = `${retained.length} retained fault windows analysed in detailed tables${missing ? ` · ${missing} selected fault snapshots were no longer retained` : ""}.`;
     const fragment = document.createDocumentFragment();
+    if (!retained.length) {
+      el.depthResults.replaceChildren();
+      return;
+    }
+    fragment.appendChild(renderFaultReference(retained));
     result.parameters.forEach((parameter) => {
-      const card = document.createElement("article"); card.className = "comparison-card";
-      const title = document.createElement("h3");
-      title.textContent = `${parameter.name}${parameter.unit ? ` [${parameter.unit}]` : ""}`;
-      const legend = document.createElement("div"); legend.className = "comparison-legend";
-      retained.forEach((item, index) => {
-        const label = document.createElement("span");
-        const swatch = document.createElement("i"); swatch.className = "legend-swatch"; swatch.style.background = COMPARISON_COLORS[index % COMPARISON_COLORS.length];
-        label.append(swatch, document.createTextNode(`#${item.fault.fault_code} · ${item.fault.timestamp}`));
-        legend.appendChild(label);
-      });
-      const canvas = document.createElement("canvas"); canvas.height = 265;
-      card.append(title, legend, canvas); fragment.appendChild(card);
-      requestAnimationFrame(() => drawDepthChart(canvas, retained, parameter));
+      const section = document.createElement("details");
+      section.className = "comparison-section";
+      section.open = true;
+      const summary = document.createElement("summary");
+      summary.appendChild(document.createTextNode(parameter.name));
+      if (parameter.unit) {
+        const unit = document.createElement("span");
+        unit.className = "parameter-unit";
+        unit.textContent = `[${parameter.unit}]`;
+        summary.appendChild(unit);
+      }
+      const body = document.createElement("div");
+      body.className = "comparison-body";
+      const categorical = retained.some((item) => item.samples.some((sample) => Boolean(sample.display?.[parameter.name])));
+      const analysis = categorical
+        ? renderCategoricalParameter(parameter, retained)
+        : renderNumericParameter(parameter, retained);
+      body.append(
+        analysisBlock(categorical ? "Fault-by-fault state summary" : "Fault-by-fault statistical summary", analysis.statsTable),
+        analysisBlock("Cross-fault comparison", analysis.groupTable),
+        analysisBlock("Exact sample readings", renderSampleMatrix(parameter, retained))
+      );
+      const note = document.createElement("p");
+      note.className = "comparison-note";
+      note.textContent = categorical
+        ? "Repeated states are condensed in the sequence summary; the exact reading table preserves every configured sample."
+        : "Pre/post values are arithmetic means of available samples. Deltas show direction and magnitude; they do not imply that an increase or decrease is healthy or unhealthy.";
+      body.appendChild(note);
+      section.append(summary, body);
+      fragment.appendChild(section);
     });
     el.depthResults.replaceChildren(fragment);
-  }
-
-  function drawDepthChart(canvas, faults, parameter) {
-    const width = Math.max(440, canvas.clientWidth || 620), height = 265;
-    const scale = window.devicePixelRatio || 1;
-    canvas.width = Math.round(width * scale); canvas.height = Math.round(height * scale);
-    const ctx = canvas.getContext("2d"); ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    const left = 57, right = width - 15, top = 15, bottom = height - 42;
-    let minimum = Infinity, maximum = -Infinity;
-    faults.forEach((item) => item.samples.forEach((sample) => {
-      const value = Number(sample.values?.[parameter.name]);
-      if (Number.isFinite(value)) { minimum = Math.min(minimum, value); maximum = Math.max(maximum, value); }
-    }));
-    if (!Number.isFinite(minimum)) {
-      ctx.fillStyle = "#637b8c"; ctx.font = "12px Segoe UI"; ctx.textAlign = "center";
-      ctx.fillText("No numeric readings for this parameter", width / 2, height / 2); return;
-    }
-    if (minimum === maximum) { minimum -= .5; maximum += .5; }
-    const pad = (maximum - minimum) * .08; minimum -= pad; maximum += pad;
-    ctx.font = "10px Segoe UI"; ctx.fillStyle = "#637b8c"; ctx.strokeStyle = "#dce9f1";
-    for (let tick = 0; tick <= 4; tick += 1) {
-      const y = top + (bottom - top) * tick / 4;
-      ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
-      ctx.textAlign = "right"; ctx.fillText(Number((maximum - (maximum - minimum) * tick / 4).toFixed(2)), left - 7, y + 3);
-    }
-    const sampleCount = faults[0]?.samples.length || 10;
-    const xAt = (index) => left + (right - left) * index / Math.max(1, sampleCount - 1);
-    const yAt = (value) => bottom - (value - minimum) / (maximum - minimum) * (bottom - top);
-    const labels = faults[0]?.samples.map((sample) => sample.label) || [];
-    labels.forEach((label, index) => {
-      ctx.fillStyle = "#637b8c"; ctx.textAlign = "center"; ctx.fillText(label.replace("Fault instant", "Instant"), xAt(index), bottom + 18);
-    });
-    faults.forEach((item, faultIndex) => {
-      ctx.beginPath(); ctx.strokeStyle = COMPARISON_COLORS[faultIndex % COMPARISON_COLORS.length]; ctx.lineWidth = 1.8;
-      let active = false;
-      item.samples.forEach((sample, index) => {
-        const value = Number(sample.values?.[parameter.name]);
-        if (!Number.isFinite(value)) { active = false; return; }
-        if (!active) { ctx.moveTo(xAt(index), yAt(value)); active = true; } else ctx.lineTo(xAt(index), yAt(value));
-      });
-      ctx.stroke();
-    });
-    const occurrence = labels.indexOf("Occurrence"), instant = labels.indexOf("Fault instant");
-    [occurrence, instant].filter((index) => index >= 0).forEach((index) => {
-      ctx.strokeStyle = "rgba(239,131,84,.55)"; ctx.setLineDash([4, 3]);
-      ctx.beginPath(); ctx.moveTo(xAt(index), top); ctx.lineTo(xAt(index), bottom); ctx.stroke(); ctx.setLineDash([]);
-    });
   }
 
   function initialisePopulationDates() {
@@ -1100,7 +1419,11 @@
     state.history.offset += state.history.limit; loadHistory(false);
   });
   el.historyExcel.addEventListener("click", downloadHistoryExcel);
+  el.historyPdf.addEventListener("click", downloadHistoryPdf);
   el.loadChart.addEventListener("click", loadHistoryChart);
+  el.historyShowSelected.addEventListener("click", () => showHistoryTableParameters(false));
+  el.historyShowAll.addEventListener("click", () => showHistoryTableParameters(true));
+  el.chartParameters.addEventListener("change", updateHistoryParameterActions);
   el.resetChart.addEventListener("click", () => historyChart.resetView());
   el.viewSelectedRange.addEventListener("click", () => historyChart.viewSelection());
   el.chartPng.addEventListener("click", downloadChartPng);
@@ -1109,7 +1432,10 @@
     state.depth.selected.clear();
     el.depthResults.replaceChildren();
     renderDepthSelection();
-    renderVirtualFaults();
+  });
+  el.depthFaultSearch.addEventListener("input", () => {
+    el.depthFaultList.scrollTop = 0;
+    renderDepthFaultOptions();
   });
   el.depthParameterSearch.addEventListener("input", renderDepthParameterOptions);
   el.depthParameters.addEventListener("change", updateDepthParameterSelection);

@@ -96,7 +96,7 @@
         <div class="result-line"><strong id="filteredFaultCount">0</strong> fault records · newest first</div>
         <div class="fault-grid" role="table" aria-label="Fault records">
           <div class="fault-grid-header" role="row">
-            <span>Pick</span><span>Date &amp; Time</span><span>Code</span><span>Fault</span><span>DMC</span>
+            <span>Date &amp; Time</span><span>Code</span><span>Fault</span><span>DMC</span>
             <span>Role</span><span>Packet</span><span>Environment</span>
           </div>
           <div id="faultViewport" class="fault-viewport" tabindex="0">
@@ -119,7 +119,8 @@
             <p id="historySubtitle"></p>
           </div>
           <div class="panel-actions">
-            <button id="historyExcel" type="button" disabled>Download displayed rows as Excel</button>
+            <button id="historyExcel" type="button" disabled>Table Excel</button>
+            <button id="historyPdf" type="button" disabled>Table PDF</button>
             <div id="historyReadyBadge" class="status-badge">Waiting for upload</div>
           </div>
         </header>
@@ -154,7 +155,11 @@
                 <select id="chartParameters" multiple size="5"></select>
               </label>
               <div class="chart-load-box">
-                <button id="loadChart" class="primary-button" type="button" disabled>Draw selected parameters</button>
+                <div class="parameter-output-actions">
+                  <button id="loadChart" class="primary-button" type="button" disabled>Draw selected parameters</button>
+                  <button id="historyShowSelected" type="button" disabled>Show selected in table</button>
+                  <button id="historyShowAll" type="button" disabled>Show all in table</button>
+                </div>
                 <p id="chartStatus">Select the long-term or short-term tab to prepare a chart.</p>
               </div>
             </div>
@@ -178,26 +183,30 @@
         <header class="panel-head">
           <div>
             <h2>Depth Analysis</h2>
-            <p>Select retained faults in the Fault Log, choose FDP parameters, and compare their pre/fault/post patterns.</p>
+            <p>Select retained faults here, choose FDP parameters, and compare exact pre-fault, occurrence, instant, and post-fault readings in tables.</p>
           </div>
           <div id="depthBadge" class="status-badge">0 faults selected</div>
         </header>
         <div class="depth-setup">
-          <section class="depth-picker">
-            <div class="depth-picker-title"><h3>Selected fault logs</h3><button id="depthClear" type="button">Clear all</button></div>
+          <section class="depth-picker depth-fault-picker">
+            <div class="depth-picker-title">
+              <div><span class="depth-step">Step 1</span><h3>Select retained faults</h3></div>
+              <div class="depth-picker-actions"><span id="depthFaultMatch">0 available</span><button id="depthClear" type="button">Clear</button></div>
+            </div>
+            <input id="depthFaultSearch" class="depth-search" type="search" placeholder="Search date, fault code, description, DMC or role…" disabled>
             <div id="depthFaultList" class="depth-fault-list">
-              <p class="depth-placeholder">Use the Compare checkboxes in the Fault Log. Up to 12 retained faults can be selected.</p>
+              <p class="depth-placeholder">Upload an ALL Data ZIP to choose up to 12 retained faults.</p>
             </div>
           </section>
           <section class="depth-picker">
-            <div class="depth-picker-title"><h3>Parameters to compare</h3><span>Maximum 6</span></div>
+            <div class="depth-picker-title"><div><span class="depth-step">Step 2</span><h3>Choose FDP parameters</h3></div><span>Maximum 6</span></div>
             <input id="depthParameterSearch" class="depth-search" type="search" placeholder="Search 807 FDP parameters…">
             <select id="depthParameters" multiple size="10" disabled></select>
-            <button id="depthRun" class="primary-button" type="button" disabled>Run pattern comparison</button>
+            <button id="depthRun" class="primary-button" type="button" disabled>Build detailed comparison tables</button>
           </section>
         </div>
         <div id="depthProgress" class="depth-progress">Select at least two retained faults.</div>
-        <div id="depthResults" class="comparison-grid"></div>
+        <div id="depthResults" class="depth-results"></div>
       </section>
 
       <section id="populationView" class="view-panel" hidden>

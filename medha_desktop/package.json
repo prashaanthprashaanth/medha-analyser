@@ -1,6 +1,6 @@
 {
   "name": "medha-data-analyser",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Standalone Medha MEC628 locomotive data analyser",
   "main": "electron-main.js",
   "author": "ELS/ED",
@@ -17,8 +17,10 @@
   "build": {
     "appId": "in.railways.elsed.medhadataanalyser",
     "productName": "Medha Data Analyser",
+    "npmRebuild": false,
     "asar": true,
-    "compression": "maximum",
+    "compression": "normal",
+    "electronLanguages": ["en-US"],
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -31,7 +33,7 @@
     ],
     "extraResources": [
       {
-        "from": "../dist_backend/medha_backend.exe",
+        "from": "../dist_backend313/medha_backend.exe",
         "to": "backend/medha_backend.exe"
       }
     ],
@@ -50,4 +52,3 @@
     }
   }
 }
-

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Notification } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Notification, session } = require("electron");
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
 const fsp = require("fs/promises");
@@ -9,9 +9,13 @@ const readline = require("readline");
 let mainWindow = null;
 let backendProcess = null;
 let backendPort = null;
+let shutdownStarted = false;
+const detailWindows = new Set();
 const hasInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasInstanceLock) app.quit();
+app.commandLine.appendSwitch("disable-http-cache");
+app.setAppUserModelId("in.railways.elsed.medhadataanalyser");
 
 function backendCommand() {
   if (app.isPackaged) {
@@ -39,10 +43,10 @@ function backendCommand() {
 function startBackend() {
   return new Promise((resolve, reject) => {
     const launch = backendCommand();
-    backendProcess = spawn(launch.command, launch.args, {
+    backendProcess = spawn(launch.command, [...launch.args, "--parent-pid", String(process.pid)], {
       cwd: path.join(__dirname, ".."),
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"]
     });
     let settled = false;
     const lines = readline.createInterface({ input: backendProcess.stdout });
@@ -69,8 +73,21 @@ function startBackend() {
     });
     setTimeout(() => {
       if (!settled) reject(new Error("Decoder service startup timed out"));
-    }, 15000);
+    }, 45000);
   });
+}
+
+async function stopBackend() {
+  const child = backendProcess;
+  backendProcess = null;
+  backendPort = null;
+  if (!child || child.killed) return;
+  try { child.stdin?.end(); } catch (_error) { /* Process may already be gone. */ }
+  await Promise.race([
+    new Promise((resolve) => child.once("exit", resolve)),
+    new Promise((resolve) => setTimeout(resolve, 1200))
+  ]);
+  if (child.exitCode == null && !child.killed) child.kill();
 }
 
 function apiRequest(endpoint, payload, method = "POST") {
@@ -156,7 +173,13 @@ function createMainWindow() {
       }, delay);
     });
   }
-  mainWindow.on("closed", () => { mainWindow = null; });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+    for (const child of detailWindows) {
+      if (!child.isDestroyed()) child.close();
+    }
+    app.quit();
+  });
   const automaticFault = Number(process.env.MEDHA_AUTO_FAULT);
   if (Number.isInteger(automaticFault) && automaticFault >= 0) {
     mainWindow.webContents.once("did-finish-load", () => {
@@ -172,6 +195,7 @@ function createFaultWindow(rowIndex) {
     width: 1540,
     height: 940
   }));
+  detailWindows.add(detailWindow);
   secureWindow(detailWindow);
   detailWindow.loadFile(path.join(__dirname, "viewer", "detail.html"), {
     query: { row: String(rowIndex) }
@@ -180,6 +204,7 @@ function createFaultWindow(rowIndex) {
     detailWindow.maximize();
     detailWindow.show();
   });
+  detailWindow.on("closed", () => detailWindows.delete(detailWindow));
 }
 
 function safeFilename(filename) {
@@ -270,6 +295,8 @@ ipcMain.handle("medha:save-chart-pdf", async (_event, payload) => {
 
 app.whenReady().then(async () => {
   try {
+    await session.defaultSession.clearCache();
+    await session.defaultSession.clearStorageData({ storages: ["serviceworkers", "cachestorage"] });
     await startBackend();
     createMainWindow();
   } catch (error) {
@@ -285,6 +312,9 @@ app.on("second-instance", () => {
   mainWindow.show();
   mainWindow.focus();
 });
-app.on("before-quit", () => {
-  if (backendProcess && !backendProcess.killed) backendProcess.kill();
+app.on("before-quit", (event) => {
+  if (shutdownStarted || !backendProcess || backendProcess.killed) return;
+  event.preventDefault();
+  shutdownStarted = true;
+  stopBackend().finally(() => app.quit());
 });

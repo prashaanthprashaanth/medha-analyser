@@ -129,11 +129,6 @@
     return { headers, rows };
   }
 
-  function csvEscape(value) {
-    const text = value == null ? "" : String(value);
-    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-  }
-
   function bytesFromBase64(value) {
     const raw = atob(value);
     const bytes = new Uint8Array(raw.length);
@@ -155,17 +150,52 @@
     } catch (error) { showToast(error.message, true); }
   }
 
-  function htmlEscape(value) {
-    return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
-  }
-
   async function exportHtml() {
-    const { headers, rows } = exportRows();
-    const table = `<table><thead><tr>${headers.map((item) => `<th>${htmlEscape(item)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((item) => `<td>${htmlEscape(item)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-    const report = `<!doctype html><meta charset="utf-8"><title>Medha Fault ${detail.fault.fault_code}</title><style>body{font:13px Segoe UI;margin:25px;color:#183247}h1{color:#0b3b61}table{border-collapse:collapse}th,td{padding:6px 8px;border:1px solid #cadce7;white-space:nowrap}th{background:#0c4f78;color:white;position:sticky;top:0}tr:nth-child(even){background:#f1f9fd}</style><h1>MEDHA DATA ANALYSER</h1><p>Developed by ELS/ED</p><h2>Fault ${htmlEscape(detail.fault.fault_code)} — ${htmlEscape(detail.fault.timestamp)}</h2><p>${htmlEscape(detail.fault.fault_message)}</p>${table}`;
+    const parameters = detail.parameters.map((parameter) => [
+      parameter.name,
+      parameter.unit,
+      parameter.visible ? 1 : 0,
+      parameter.children.map((child) => [
+        child.name, child.unit, child.bit_position, child.on_message, child.off_message,
+        child.visible ? 1 : 0
+      ])
+    ]);
+    const samples = detail.samples.map((sample) => [
+      sample.label,
+      sample.timestamp,
+      sample.row_index == null ? 0 : 1,
+      detail.parameters.map((parameter) => {
+        if (sample.row_index == null || !sample.values) return null;
+        const value = sample.values[parameter.name];
+        const meaning = sample.display?.[parameter.name];
+        return meaning ? [value, meaning] : value;
+      })
+    ]);
+    const payload = {
+      v: 1,
+      f: [
+        detail.fault.timestamp, detail.fault.fault_code, detail.fault.dmc,
+        detail.fault.mastership, detail.fault.fault_message, detail.fault.priority,
+        detail.fault.recovery, detail.fault.reset
+      ],
+      c: detail.config,
+      p: parameters,
+      s: samples
+    };
+    const payloadJson = JSON.stringify(payload).replaceAll("<", "\\u003c");
+    const report = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="Medha Data Analyser 1.0"><title>Medha Fault Report</title><style>
+*{box-sizing:border-box}body{margin:0;padding:18px;font:12px "Segoe UI",Arial;color:#17334a;background:#f5fbfe}header,.card{max-width:100%;margin:0 0 12px;padding:15px;border:1px solid #d5e5ee;border-radius:11px;background:#fff}header{text-align:center}h1{margin:0;color:#0b3b61;letter-spacing:.08em}h2{margin:7px 0;color:#0c4f78}p{margin:5px 0;color:#617b8d}.meta{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:8px;margin-top:12px}.meta b{display:block;padding:10px;border-radius:7px;background:#eef8fc;color:#0b3b61}.tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.tools input[type=search]{min-width:320px;flex:1;padding:9px;border:1px solid #bdd4e1;border-radius:7px}.wrap{max-height:72vh;overflow:auto;border:1px solid #cfdee7;border-radius:8px}table{width:100%;border-collapse:collapse}th,td{padding:7px 9px;border-bottom:1px solid #e3edf3;white-space:nowrap;text-align:left}th{position:sticky;top:0;z-index:2;color:#fff;background:#0c4f78}td:first-child{position:sticky;left:0;background:#f4fafe;font-weight:600}tr:nth-child(even) td{background:#f9fcfe}tr.child td{color:#365b71;background:#eaf6fb}button{width:23px;height:23px;margin-right:7px;padding:0;border:0;border-radius:5px;color:#fff;background:#0b6b9b;font-weight:800;cursor:pointer}.summary{font-weight:700;color:#0b6b9b}@media(max-width:850px){.meta{grid-template-columns:1fr 1fr}}
+</style></head><body><header><h1>MEDHA DATA ANALYSER</h1><p>Developed by ELS/ED · Compact interactive fault report</p><h2 id="faultTitle"></h2><p id="faultMessage"></p><div class="meta"><b id="dmc"></b><b id="role"></b><b id="priority"></b><b id="window"></b></div></header><section class="card"><div class="tools"><input id="search" type="search" placeholder="Search parameter or sub-signal"><label><input id="all" type="checkbox" checked> Show all definition parameters</label><span id="summary" class="summary"></span></div><div class="wrap"><table><thead id="head"></thead><tbody id="body"></tbody></table></div></section><script id="data" type="application/json">${payloadJson}</script><script>
+(function(){"use strict";var D=JSON.parse(document.getElementById("data").textContent),F=D.f,P=D.p,S=D.s,X=new Set(),Q=document.getElementById("search"),A=document.getElementById("all"),B=document.getElementById("body"),E=function(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\\"":"&quot;","'":"&#39;"}[c]})},V=function(v){return Array.isArray(v)?String(v[0])+" — "+String(v[1]):v==null?"":String(v)},C=function(v,c){v=Array.isArray(v)?v[0]:v;var n=Number(v);if(!Number.isFinite(n))return"";var z=Math.floor(n/Math.pow(2,c[2]))%2,m=z?c[3]:c[4];return String(z)+(m?" — "+m:"")};document.getElementById("faultTitle").textContent="Fault "+F[1]+" — "+F[0];document.getElementById("faultMessage").textContent=F[4];document.getElementById("dmc").textContent="DMC: "+(F[2]||"—");document.getElementById("role").textContent="Role: "+(F[3]||"—");document.getElementById("priority").textContent="Priority: "+(F[5]||"—")+" · Recovery: "+(F[6]||"—")+" · Reset: "+(F[7]||"—");document.getElementById("window").textContent=D.c.previous_seconds+" s before · occurrence · instant · "+D.c.next_seconds+" s after";document.getElementById("head").innerHTML="<tr><th>Parameter</th><th>Unit</th>"+S.map(function(s){return"<th>"+E(s[0])+"<br>"+E(s[1])+"</th>"}).join("")+"</tr>";function R(){var q=Q.value.trim().toLowerCase(),all=A.checked,out="",count=0,children=0;P.forEach(function(p,i){var hit=!q||p[0].toLowerCase().includes(q)||p[3].some(function(c){return c[0].toLowerCase().includes(q)});if(!hit||(!all&&!p[2]))return;count++;children+=p[3].length;out+="<tr><td>"+(p[3].length?"<button data-i=\""+i+"\">"+(X.has(i)?"−":"+")+"</button>":"")+E(p[0])+"</td><td>"+E(p[1])+"</td>"+S.map(function(s){return"<td>"+E(V(s[3][i]))+"</td>"}).join("")+"</tr>";if(X.has(i)||q&&p[3].some(function(c){return c[0].toLowerCase().includes(q)}))p[3].forEach(function(c){if(!all&&!c[5]||q&&!p[0].toLowerCase().includes(q)&&!c[0].toLowerCase().includes(q))return;out+="<tr class=\"child\"><td>↳ Bit "+c[2]+": "+E(c[0])+"</td><td>"+E(c[1])+"</td>"+S.map(function(s){return"<td>"+E(C(s[3][i],c))+"</td>"}).join("")+"</tr>"})});B.innerHTML=out;document.getElementById("summary").textContent=count.toLocaleString()+" parameters · "+children.toLocaleString()+" sub-signals"}B.onclick=function(e){var b=e.target.closest("button[data-i]");if(!b)return;var i=Number(b.dataset.i);X.has(i)?X.delete(i):X.add(i);R()};Q.oninput=R;A.onchange=R;R()})();
+</script></body></html>`;
+    // Attribute quotes inside the embedded script are consumed by this outer
+    // template literal. Keep those two generated attributes unquoted instead.
+    const compactReport = report
+      .replaceAll('data-i=""+i+""', 'data-i="+i+"')
+      .replaceAll('class="child"', 'class=child');
     const filename = `fault_${detail.fault.fault_code}_${detail.fault.timestamp.replaceAll(":", "-")}.html`;
     try {
-      const result = await window.MedhaDesktop.saveExport(filename, new TextEncoder().encode(report));
+      const result = await window.MedhaDesktop.saveExport(filename, new TextEncoder().encode(compactReport));
       showToast(`Saved to ${result.destination}`);
     } catch (error) { showToast(error.message, true); }
   }

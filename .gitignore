@@ -9,7 +9,17 @@ node_modules/
 medha_desktop/node_modules/
 medha_desktop/dist/
 dist_backend/
+dist_backend313/
+dist_backend_test/
 build_backend/
+build_backend_test/
+release/
+release_temp/
+release_console/
+release_v1/
+release_portable/
+.build_v1/
+deliverable_v1/
 *.spec
 
 # Raw locomotive downloads and exported reports

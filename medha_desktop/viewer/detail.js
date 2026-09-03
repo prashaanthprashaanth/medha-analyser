@@ -6,12 +6,13 @@
   const expanded = new Set();
   const selectedParameters = new Set();
   let draftSelection = new Set();
+  let selectionActive = false;
   const el = Object.fromEntries([
     "closeWindow", "detailCsv", "detailHtml", "faultCard", "faultTime", "faultCode", "faultDmc",
     "faultRole", "faultMessage", "faultMeta", "detailContent", "windowDescription", "parameterCount",
     "sampleStrip", "parameterSearch", "selectionStatus", "openParameterPicker", "fdpHead", "fdpBody",
     "parameterPicker", "closeParameterPicker", "pickerSearch", "selectMatchingParameters",
-    "clearParameterSelection", "pickerList", "pickerCount", "cancelParameterPicker",
+    "clearParameterSelection", "showAllParameterRows", "pickerList", "pickerCount", "cancelParameterPicker",
     "applyParameterSelection", "notRetained", "detailError", "loadingOverlay", "detailLoadingText",
     "detailProgress", "toast"
   ].map((id) => [id, document.getElementById(id)]));
@@ -129,7 +130,7 @@
 
   function openParameterPicker() {
     if (!detail?.retained) return;
-    draftSelection = new Set(selectedParameters);
+    draftSelection = selectionActive ? new Set(selectedParameters) : new Set();
     el.pickerSearch.value = "";
     renderParameterPicker();
     el.parameterPicker.showModal();
@@ -140,24 +141,29 @@
     if (el.parameterPicker.open) el.parameterPicker.close();
   }
 
-  function selectedParameterEntries() {
-    return detail.parameters
-      .map((parameter, index) => ({ parameter, index }))
-      .filter(({ index }) => selectedParameters.has(index));
+  function displayedParameterEntries() {
+    const entries = detail.parameters.map((parameter, index) => ({ parameter, index }));
+    return selectionActive
+      ? entries.filter(({ index }) => selectedParameters.has(index))
+      : entries;
   }
 
   function updateSelectionState() {
-    const selectedCount = selectedParameters.size;
-    el.selectionStatus.textContent = `${selectedCount.toLocaleString()} of ${detail.parameters.length.toLocaleString()} parameters selected`;
-    el.parameterSearch.disabled = selectedCount === 0;
-    el.detailCsv.disabled = selectedCount === 0;
-    el.detailHtml.disabled = selectedCount === 0;
+    const displayedCount = selectionActive ? selectedParameters.size : detail.parameters.length;
+    el.selectionStatus.textContent = selectionActive
+      ? `${displayedCount.toLocaleString()} of ${detail.parameters.length.toLocaleString()} parameters selected`
+      : `All ${detail.parameters.length.toLocaleString()} parameters displayed`;
+    el.parameterSearch.disabled = displayedCount === 0;
+    el.detailCsv.disabled = displayedCount === 0;
+    // The compact HTML is always the complete retained FDP, independent of
+    // the temporary on-screen parameter filter.
+    el.detailHtml.disabled = false;
   }
 
   function renderTable() {
     if (!detail?.retained) return;
     const query = el.parameterSearch.value.trim().toLocaleLowerCase();
-    const parameters = selectedParameterEntries().map(({ parameter }) => parameter).filter((parameter) => {
+    const parameters = displayedParameterEntries().map(({ parameter }) => parameter).filter((parameter) => {
       if (!query) return true;
       if (parameter.name.toLocaleLowerCase().includes(query)) return true;
       return parameter.children.some((child) => child.name.toLocaleLowerCase().includes(query));
@@ -205,9 +211,9 @@
     });
     if (!parameters.length) {
       const emptyRow = document.createElement("tr");
-      const emptyCell = cell(selectedParameters.size
-        ? "No selected parameter matches this search."
-        : "No parameters selected. Click Select parameters to choose the readings you need.", "fdp-empty-cell");
+      const emptyCell = cell(selectionActive && !selectedParameters.size
+        ? "No parameters selected. Click Select parameters to choose the readings you need."
+        : "No displayed parameter matches this search.", "fdp-empty-cell");
       emptyCell.colSpan = detail.samples.length + 2;
       emptyRow.appendChild(emptyCell);
       fragment.appendChild(emptyRow);
@@ -221,7 +227,7 @@
   function exportRows() {
     const headers = ["Parameter", "Unit", ...detail.samples.map((sample) => `${sample.label} ${sample.timestamp}`)];
     const rows = [];
-    selectedParameterEntries().forEach(({ parameter }) => {
+    displayedParameterEntries().forEach(({ parameter }) => {
       rows.push([parameter.name, parameter.unit, ...detail.samples.map((sample) => valueAt(sample, parameter))]);
       parameter.children.forEach((child) => {
         rows.push([`Bit ${child.bit_position}: ${child.name}`, child.unit, ...detail.samples.map((sample) => childValue(sample, parameter, child))]);
@@ -251,9 +257,8 @@
     } catch (error) { showToast(error.message, true); }
   }
 
-  async function exportHtml() {
-    const selected = selectedParameterEntries().map(({ parameter }) => parameter);
-    const parameters = selected.map((parameter) => [
+  async function exportSingleFaultHtml() {
+    const parameters = detail.parameters.map((parameter) => [
       parameter.name,
       parameter.unit,
       parameter.visible ? 1 : 0,
@@ -266,7 +271,7 @@
       sample.label,
       sample.timestamp,
       sample.row_index == null ? 0 : 1,
-      selected.map((parameter) => {
+      detail.parameters.map((parameter) => {
         if (sample.row_index == null || !sample.values) return null;
         const value = sample.values[parameter.name];
         const meaning = sample.display?.[parameter.name];
@@ -302,6 +307,37 @@
     } catch (error) { showToast(error.message, true); }
   }
 
+  async function exportHtml() {
+    el.detailHtml.disabled = true;
+    el.loadingOverlay.hidden = false;
+    el.loadingOverlay.querySelector("h2").textContent = "Building all Fault + FDP HTML";
+    el.detailProgress.value = 0;
+    el.detailLoadingText.textContent = "0% · Linking retained fault environments…";
+    let polling = false;
+    const progressTimer = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const status = await api("/status", null, "GET");
+        const progress = Math.round(status.report?.progress || 0);
+        el.detailProgress.value = progress;
+        el.detailLoadingText.textContent = `${progress}% · Compressing complete Fault + FDP data…`;
+      } catch { /* the export request will report its own error */ }
+      finally { polling = false; }
+    }, 450);
+    try {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const result = await window.MedhaDesktop.saveFaultFdpReport();
+      showToast(`Complete Fault + FDP HTML saved to ${result.destination}`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      clearInterval(progressTimer);
+      el.loadingOverlay.hidden = true;
+      el.detailHtml.disabled = false;
+    }
+  }
+
   function showDetail(result) {
     detail = result;
     const fault = result.fault;
@@ -312,6 +348,7 @@
     el.faultMessage.textContent = fault.fault_message;
     el.faultMeta.textContent = `Priority: ${fault.priority || "—"} · Recovery: ${fault.recovery || "—"} · Reset: ${fault.reset || "—"}`;
     el.faultCard.hidden = false;
+    el.detailHtml.disabled = false;
     if (!result.retained) {
       el.notRetained.hidden = false;
       return;
@@ -320,7 +357,6 @@
     renderSamples();
     el.detailContent.hidden = false;
     renderTable();
-    setTimeout(openParameterPicker, 0);
   }
 
   async function load() {
@@ -376,10 +412,20 @@
     draftSelection.clear();
     renderParameterPicker();
   });
+  el.showAllParameterRows.addEventListener("click", () => {
+    selectionActive = false;
+    selectedParameters.clear();
+    draftSelection.clear();
+    el.parameterSearch.value = "";
+    closeParameterPicker();
+    renderTable();
+    showToast(`All ${detail.parameters.length.toLocaleString()} parameters displayed`);
+  });
   el.applyParameterSelection.addEventListener("click", () => {
     selectedParameters.clear();
     draftSelection.forEach((index) => selectedParameters.add(index));
-    const selectedNames = new Set(selectedParameterEntries().map(({ parameter }) => parameter.name));
+    selectionActive = true;
+    const selectedNames = new Set(displayedParameterEntries().map(({ parameter }) => parameter.name));
     [...expanded].forEach((name) => { if (!selectedNames.has(name)) expanded.delete(name); });
     el.parameterSearch.value = "";
     closeParameterPicker();

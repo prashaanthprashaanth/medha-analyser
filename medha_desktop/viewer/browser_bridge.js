@@ -21,6 +21,24 @@
     return result;
   }
 
+  async function saveFaultFdpReport() {
+    const response = await fetch("/fault-fdp-html", {
+      method: "POST",
+      cache: "no-store",
+      headers: sessionHeaders()
+    });
+    if (!response.ok) {
+      let message = "The Fault + FDP HTML report could not be prepared";
+      try { message = (await response.json()).error || message; } catch { /* use fallback */ }
+      throw new Error(message);
+    }
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match?.[1] || "medha_faults_fdp.html";
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return download(filename, bytes, "text/html");
+  }
+
   function uploadOverlay() {
     const shade = document.createElement("div");
     shade.style.cssText = "position:fixed;inset:0;z-index:10000;display:grid;place-items:center;background:rgba(4,40,64,.66);backdrop-filter:blur(3px)";
@@ -192,6 +210,7 @@
     },
     closeWindow: async () => { window.close(); },
     saveExport: async (filename, bytes) => download(filename, bytes),
+    saveFaultFdpReport,
     saveChartPdf
   };
 

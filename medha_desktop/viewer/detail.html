@@ -17,7 +17,7 @@
       </div>
       <div class="detail-topbar-actions">
         <button id="detailCsv" type="button" disabled>Excel</button>
-        <button id="detailHtml" class="primary-button" type="button" disabled>HTML Report</button>
+        <button id="detailHtml" class="primary-button" type="button" disabled>All Fault + FDP HTML</button>
       </div>
     </header>
 
@@ -80,7 +80,7 @@
         <div>
           <span class="picker-kicker">Fault Data Pack display</span>
           <h2 id="parameterPickerTitle">Select parameters</h2>
-          <p>All parameters start unchecked. Select only the readings required for this fault.</p>
+          <p>All parameters are displayed until you apply a selection. Check only the readings required for this fault.</p>
         </div>
         <button id="closeParameterPicker" class="picker-close" type="button" aria-label="Close parameter selection">×</button>
       </header>
@@ -91,6 +91,7 @@
         <div>
           <button id="selectMatchingParameters" type="button">Select matching</button>
           <button id="clearParameterSelection" type="button">Clear all</button>
+          <button id="showAllParameterRows" type="button">Show all parameters</button>
         </div>
       </div>
       <div id="pickerList" class="parameter-picker-list" aria-live="polite"></div>

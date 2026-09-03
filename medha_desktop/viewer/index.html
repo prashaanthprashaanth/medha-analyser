@@ -61,7 +61,10 @@
             <h2>Fault Log</h2>
             <p>All faults are shown in one continuously scrollable list. Click a row to open its diagnostic window.</p>
           </div>
-          <button id="faultCsv" type="button" disabled>Download Fault Excel</button>
+          <div class="panel-actions">
+            <button id="faultCsv" type="button" disabled>Download Fault Excel</button>
+            <button id="faultHtml" class="primary-button" type="button" disabled>Download all Fault + FDP HTML</button>
+          </div>
         </header>
         <div class="filter-bar">
           <label class="search-field">
@@ -235,7 +238,8 @@
       <div class="loader-mark">M</div>
       <h2 id="loadingTitle">Opening ALL data</h2>
       <p id="loadingText">Reading ERRORLOG.DAT first…</p>
-      <div class="indeterminate"><span></span></div>
+      <div id="loadingIndeterminate" class="indeterminate"><span></span></div>
+      <progress id="loadingProgress" max="100" value="0" hidden></progress>
     </div>
   </div>
   <div id="toast" class="toast" hidden></div>

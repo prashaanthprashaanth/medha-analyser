@@ -8,13 +8,17 @@ default browser, so Chromium is not bundled.
 
 - fault log loads first in one continuously scrollable list;
 - each fault opens in a separate browser tab with 10 time snapshots;
-- an initially unchecked parameter picker displays only the required readings;
+- all fault parameters display immediately; an optional unchecked picker can
+  reduce the table to only the required readings;
 - 807 fault parameters and expandable bitwise sub-signals;
 - long-term and short-term data load only when requested or while idle, with
   their complete available time ranges filled automatically;
 - interactive charts with parameter selection, date/time range, zoom, and A/B
   time-selection bars;
-- chart download as PNG or PDF and data download as Excel or compact HTML;
+- chart download as PNG or PDF and data download as Excel;
+- one compact offline HTML report contains the complete fault table and all
+  retained FDP/environment readings only; it deliberately excludes long-term,
+  short-term, population, depth, and chart data;
 - multi-fault Depth Analysis and whole-log Population Analysis.
 
 ## Run the portable app
@@ -52,6 +56,7 @@ portable version because that would increase the installer to about 99 MB.
 
 - `medha_analyser.py` - MEC628 binary-memory decoder.
 - `medha_service.py` - priority and interruptible background analysis service.
+- `medha_report.py` - compressed all-fault + retained-FDP offline HTML report.
 - `medha_backend.py` - authenticated local API, browser lifetime, and exports.
 - `medha_definition_v506.json.gz` - fixed compiled Medha data definition.
 - `medha_desktop/viewer/` - browser user interface.

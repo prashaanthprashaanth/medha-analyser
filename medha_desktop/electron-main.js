@@ -126,6 +126,38 @@ function apiRequest(endpoint, payload, method = "POST") {
   });
 }
 
+function binaryApiRequest(endpoint, method = "POST") {
+  return new Promise((resolve, reject) => {
+    if (!backendPort) {
+      reject(new Error("Decoder service is not running"));
+      return;
+    }
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port: backendPort,
+      path: endpoint,
+      method
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const data = Buffer.concat(chunks);
+        if (response.statusCode >= 400) {
+          try { reject(new Error(JSON.parse(data.toString("utf8")).error || "Report export failed")); }
+          catch { reject(new Error("Report export failed")); }
+          return;
+        }
+        const disposition = response.headers["content-disposition"] || "";
+        const match = disposition.match(/filename="?([^";]+)"?/i);
+        resolve({ data, filename: match?.[1] || "medha_faults_fdp.html" });
+      });
+    });
+    request.on("error", reject);
+    request.setTimeout(300000, () => request.destroy(new Error("Report export timed out")));
+    request.end();
+  });
+}
+
 function windowOptions(overrides = {}) {
   return {
     width: 1480,
@@ -261,6 +293,16 @@ ipcMain.handle("medha:save-export", async (_event, payload) => {
   await fsp.writeFile(destination, Buffer.from(payload.bytes));
   if (Notification.isSupported()) {
     new Notification({ title: "Medha export saved", body: path.basename(destination) }).show();
+  }
+  return { destination };
+});
+
+ipcMain.handle("medha:save-fault-fdp-report", async () => {
+  const report = await binaryApiRequest("/fault-fdp-html");
+  const destination = uniqueDownloadPath(report.filename);
+  await fsp.writeFile(destination, report.data);
+  if (Notification.isSupported()) {
+    new Notification({ title: "Medha report saved", body: path.basename(destination) }).show();
   }
   return { destination };
 });

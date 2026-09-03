@@ -241,6 +241,15 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_file(self, data: bytes, filename: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urlsplit(self.path).path
         try:
@@ -281,6 +290,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             if path == "/upload":
                 self._send(200, self._receive_archive())
+                return
+            if path == "/fault-fdp-html":
+                filename, report, _stats = self.service.fault_fdp_html_report()
+                self._send_file(report, filename)
                 return
             body = self._json_body()
             if path == "/load":

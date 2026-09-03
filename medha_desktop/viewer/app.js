@@ -26,8 +26,8 @@
     "fdpProgress", "fdpPercent", "lgmProgress", "lgmPercent", "shmProgress", "shmPercent",
     "faultView", "historyView", "overviewView", "faultSearch", "environmentFilter", "faultFrom",
     "faultTo", "includeHidden", "clearFaultFilters", "filteredFaultCount", "faultViewport",
-    "faultSpacer", "faultRows", "faultEmpty", "faultCsv", "loadingOverlay", "loadingTitle",
-    "loadingText", "toast", "historyTitle", "historySubtitle", "historyReadyBadge", "historyWaiting",
+    "faultSpacer", "faultRows", "faultEmpty", "faultCsv", "faultHtml", "loadingOverlay", "loadingTitle",
+    "loadingText", "loadingIndeterminate", "loadingProgress", "toast", "historyTitle", "historySubtitle", "historyReadyBadge", "historyWaiting",
     "historyWaitProgress", "historyWaitingText", "historyContent", "historyFrom", "historyTo",
     "historyLimit", "historyApply", "historySummary", "historyTable", "historyPrevious", "historyNext",
     "historyPageText", "overviewCards", "chartParameters", "loadChart", "resetChart",
@@ -53,9 +53,12 @@
     showToast.timer = setTimeout(() => { el.toast.hidden = true; }, 4500);
   }
 
-  function setLoading(show, title = "Opening ALL data", text = "Reading ERRORLOG.DAT first…") {
+  function setLoading(show, title = "Opening ALL data", text = "Reading ERRORLOG.DAT first…", progress = null) {
     el.loadingTitle.textContent = title;
     el.loadingText.textContent = text;
+    el.loadingIndeterminate.hidden = progress !== null;
+    el.loadingProgress.hidden = progress === null;
+    if (progress !== null) el.loadingProgress.value = progress;
     el.loadingOverlay.hidden = !show;
   }
 
@@ -86,6 +89,37 @@
       const result = await saveExcel("medha_fault_log.xlsx", "Fault Log", headers, rows);
       showToast(`Excel saved to ${result.destination}`);
     } catch (error) { showToast(error.message, true); }
+  }
+
+  async function downloadFaultFdpHtml() {
+    if (!state.status.ready?.FDP) {
+      showToast("Wait for Fault Data Pack indexing to finish.", true);
+      return;
+    }
+    el.faultHtml.disabled = true;
+    setLoading(true, "Building Fault + FDP HTML", "0% · Linking retained fault environments…", 0);
+    let polling = false;
+    const progressTimer = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const status = await api("/status", null, "GET");
+        const progress = Math.round(status.report?.progress || 0);
+        setLoading(true, "Building Fault + FDP HTML", `${progress}% · Compressing all faults and retained FDP data…`, progress);
+      } catch { /* the active export request will surface any error */ }
+      finally { polling = false; }
+    }, 450);
+    try {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const result = await window.MedhaDesktop.saveFaultFdpReport();
+      showToast(`Complete Fault + FDP HTML saved to ${result.destination}`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      clearInterval(progressTimer);
+      setLoading(false);
+      el.faultHtml.disabled = !state.status.ready?.FDP;
+    }
   }
 
   function shortDateRange(faults) {
@@ -120,6 +154,7 @@
       el[`${lower}Percent`].textContent = status.ready?.[key] ? "Ready" : `${Math.round(value)}%`;
       document.querySelector(`[data-worker="${key}"]`)?.classList.toggle("ready", Boolean(status.ready?.[key]));
     }
+    el.faultHtml.disabled = !state.loaded || !status.ready?.FDP || Boolean(status.report?.active);
     if (state.currentTab === "LGM" || state.currentTab === "SHM") updateHistoryWaiting();
     renderOverview();
   }
@@ -1028,6 +1063,7 @@
     control.addEventListener("change", applyFaultFilters));
   el.clearFaultFilters.addEventListener("click", clearFaultFilters);
   el.faultCsv.addEventListener("click", downloadFaultCsv);
+  el.faultHtml.addEventListener("click", downloadFaultFdpHtml);
   document.querySelectorAll(".tab").forEach((button) =>
     button.addEventListener("click", () => selectTab(button.dataset.tab)));
   el.historyApply.addEventListener("click", () => {

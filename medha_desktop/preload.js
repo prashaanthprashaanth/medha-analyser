@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld("MedhaDesktop", {
   openFault: (rowIndex) => ipcRenderer.invoke("medha:open-fault", rowIndex),
   closeWindow: () => ipcRenderer.invoke("medha:close-window"),
   saveExport: (filename, bytes) => ipcRenderer.invoke("medha:save-export", { filename, bytes }),
+  saveFaultFdpReport: () => ipcRenderer.invoke("medha:save-fault-fdp-report"),
   saveChartPdf: (payload) => ipcRenderer.invoke("medha:save-chart-pdf", payload)
 });

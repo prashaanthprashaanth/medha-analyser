@@ -53,6 +53,10 @@ class AnalysisService:
         self.history_run = Event()
         self.history_run.set()
         self.lock = Lock()
+        self.report_lock = Lock()
+        self.report_active = False
+        self.report_progress = 0.0
+        self.report_cache: tuple[str, bytes, dict[str, object]] | None = None
 
     def require_decoder(self) -> Mec628Decoder:
         if self.decoder is None:
@@ -60,6 +64,14 @@ class AnalysisService:
         return self.decoder
 
     def load_archive(self, path: str | Path) -> dict[str, Any]:
+        if not self.report_lock.acquire(blocking=False):
+            raise FormatError("Wait for the Fault + FDP HTML report to finish before opening another ZIP")
+        try:
+            return self._load_archive(path)
+        finally:
+            self.report_lock.release()
+
+    def _load_archive(self, path: str | Path) -> dict[str, Any]:
         source = Path(path)
         if not source.is_file():
             raise FormatError(f"Archive does not exist: {source}")
@@ -85,6 +97,9 @@ class AnalysisService:
         self.futures = {}
         self.errors = {}
         self.progress = {"FDP": 0.0, "LGM": 0.0, "SHM": 0.0}
+        with self.lock:
+            self.report_cache = None
+            self.report_progress = 0.0
         self.history_run.set()
         self.start_background()
         return {
@@ -167,13 +182,66 @@ class AnalysisService:
         with self.lock:
             progress = {name: round(value * 100, 1) for name, value in self.progress.items()}
             errors = dict(self.errors)
+            report = {
+                "active": self.report_active,
+                "progress": round(self.report_progress * 100, 1),
+                "cached": self.report_cache is not None,
+            }
         ready = {
             "faults": self.decoder is not None,
             "FDP": self.snapshot_lookup is not None,
             "LGM": bool(self.decoder and self.decoder.records_loaded("LGM")),
             "SHM": bool(self.decoder and self.decoder.records_loaded("SHM")),
         }
-        return {"ready": ready, "progress": progress, "errors": errors}
+        return {"ready": ready, "progress": progress, "errors": errors, "report": report}
+
+    def _set_report_progress(self, value: float) -> None:
+        with self.lock:
+            self.report_progress = max(0.0, min(1.0, value))
+
+    def fault_fdp_html_report(self) -> tuple[str, bytes, dict[str, object]]:
+        """Build or reuse the compact all-fault + retained-FDP offline report."""
+
+        with self.lock:
+            cached = self.report_cache
+        if cached is not None:
+            return cached
+        # A second detail/main window shares the first build instead of starting
+        # another 807-column decode or failing while that build is in progress.
+        self.report_lock.acquire()
+        report_started = False
+        try:
+            with self.lock:
+                cached = self.report_cache
+                if cached is not None:
+                    return cached
+                self.report_active = True
+                self.report_progress = 0.0
+            report_started = True
+            self.history_run.clear()
+            self._ensure_fdp()
+            from medha_report import build_fault_fdp_html
+
+            report, stats = build_fault_fdp_html(self, self._set_report_progress)
+            archive = self.archive_path.stem if self.archive_path else "medha_all_data"
+            safe_archive = "".join(
+                character
+                if character.isascii() and (character.isalnum() or character in "-_")
+                else "_"
+                for character in archive
+            ).strip("_")[:90]
+            filename = f"{safe_archive or 'medha_all_data'}_faults_fdp.html"
+            cached = (filename, report, stats)
+            with self.lock:
+                self.report_cache = cached
+                self.report_progress = 1.0
+            return cached
+        finally:
+            if report_started:
+                self.history_run.set()
+                with self.lock:
+                    self.report_active = False
+            self.report_lock.release()
 
     def get_faults(self) -> list[dict[str, object]]:
         self.sync_completed()

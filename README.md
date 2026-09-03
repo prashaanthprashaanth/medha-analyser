@@ -48,10 +48,12 @@ PowerShell:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build_v1.ps1
 ```
 
-The result is `release\Medha_Data_Analyser_v1.0.exe`. PyInstaller dependencies
-are downloaded only into the ignored `.build_v1` directory. The Electron source
-is retained as an optional development shell, but it is not bundled in the
-portable version because that would increase the installer to about 99 MB.
+The result is `release\Medha_Data_Analyser_v1.0.exe`. This fixed path is the
+single latest portable executable tracked in Git; rebuilding replaces it rather
+than creating versioned binary copies. PyInstaller dependencies are downloaded
+only into the ignored `.build_v1` directory. The Electron source is retained as
+an optional development shell, but it is not bundled in the portable version
+because that would increase the installer to about 99 MB.
 
 ## Source layout
 
@@ -64,5 +66,5 @@ portable version because that would increase the installer to about 99 MB.
 - `packaging/MedhaLauncher.cs` - small Windows launcher and startup screen.
 - `build_v1.ps1` - reproducible portable EXE build.
 
-Raw locomotive archives, exports, dependencies, caches, and generated EXEs are
-deliberately excluded from Git.
+Raw locomotive archives, exports, dependencies, caches, and all generated EXEs
+except `release\Medha_Data_Analyser_v1.0.exe` are deliberately excluded from Git.
